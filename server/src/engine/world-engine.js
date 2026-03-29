@@ -1,5 +1,6 @@
 // 世界状态引擎，负责小镇行为与运行时状态管理
 const fs = require('fs');
+const zlib = require('zlib');
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const { ZONE_INTERACTIONS, ZONE_CATEGORY_MAP } = require('../data/interactions');
@@ -43,16 +44,35 @@ function deriveHandle(publicKey) {
   return `at_${crypto.createHash('sha256').update(publicKey).digest('hex').slice(0, 24)}`;
 }
 
+function decodeTileLayerData(layer) {
+  if (Array.isArray(layer.data)) return layer.data;
+  if (layer.encoding !== 'base64') throw new Error(`不支持的图层编码: ${layer.encoding || 'unknown'}`);
+  const raw = Buffer.from(layer.data, 'base64');
+  const inflated = layer.compression === 'zlib' ? zlib.inflateSync(raw) : raw;
+  const decoded = [];
+  for (let offset = 0; offset < inflated.length; offset += 4) decoded.push(inflated.readUInt32LE(offset));
+  return decoded;
+}
+
+function normalizeMapData(mapData) {
+  return {
+    ...mapData,
+    layers: (mapData.layers || []).map((layer) => (
+      layer.type === 'tilelayer' ? { ...layer, data: decodeTileLayerData(layer) } : layer
+    )),
+  };
+}
+
 function init(mapPath) {
   if (!fs.existsSync(mapPath)) {
     console.error('❌ 找不到 map.tmj！');
     return;
   }
 
-  worldMap = JSON.parse(fs.readFileSync(mapPath, 'utf8'));
+  worldMap = normalizeMapData(JSON.parse(fs.readFileSync(mapPath, 'utf8')));
   collisionMap = new Array(worldMap.width * worldMap.height).fill(0);
 
-  const collisionLayers = ['BaseNature', 'Nature', 'Building', 'BuildingTop'];
+  const collisionLayers = ['basewall', 'wall'];
   worldMap.layers.forEach((layer) => {
     if (layer.type === 'tilelayer' && collisionLayers.includes(layer.name)) {
       layer.data.forEach((tileId, index) => {
@@ -180,8 +200,8 @@ function sanitize(player) {
   };
 }
 
-function addChat(playerId, name, message, x, y) {
-  const entry = { id: ++nextChatCursor, playerId, time: Date.now(), name, message, x, y };
+function addChat(playerId, name, message, x, y, options = {}) {
+  const entry = { id: ++nextChatCursor, playerId, time: Date.now(), name, message, x, y, scope: options.scope || 'local' };
   chatHistory.push(entry);
   if (chatHistory.length > MAX_CHAT_MESSAGES) chatHistory.shift();
   events.emit('chat', entry);
@@ -410,8 +430,31 @@ function join(playerId, name, sprite, options = {}) {
     nextSpriteIndex += 1;
   }
 
-  const spawnX = 5;
-  const spawnY = 5;
+  // Find MainHall zone for spawn point
+  const mainHall = semanticZones.find(z => z.name === 'MainHall' || z.name === '中心大厅');
+  let spawnX = 5;
+  let spawnY = 5;
+  
+  if (mainHall) {
+    // Convert pixel coordinates to grid coordinates
+    const hallGridX = Math.floor(mainHall.x / worldMap.tilewidth);
+    const hallGridY = Math.floor(mainHall.y / worldMap.tileheight);
+    const hallGridWidth = Math.floor(mainHall.width / worldMap.tilewidth);
+    const hallGridHeight = Math.floor(mainHall.height / worldMap.tileheight);
+    
+    // Random spawn within MainHall bounds, avoiding edges
+    const margin = 2;
+    spawnX = hallGridX + margin + Math.floor(Math.random() * (hallGridWidth - margin * 2));
+    spawnY = hallGridY + margin + Math.floor(Math.random() * (hallGridHeight - margin * 2));
+    
+    // Ensure spawn point is walkable
+    const nearest = findNearestWalkable(collisionMap, worldMap.width, worldMap.height, spawnX, spawnY);
+    if (nearest) {
+      spawnX = nearest.x;
+      spawnY = nearest.y;
+    }
+  }
+  
   const zone = getZoneAt(spawnX, spawnY);
   const now = Date.now();
   players[playerId] = {
@@ -565,6 +608,16 @@ async function move(playerId, target) {
     player.lastDirection = directionFromDelta(step.x - prev.x, step.y - prev.y);
     touchAction(playerId);
     broadcast();
+    
+    // Emit move progress event
+    events.emit('moveProgress', {
+      playerId,
+      x: step.x,
+      y: step.y,
+      step: i,
+      total: path.length - 1,
+    });
+    
     if (i < path.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, MOVE_TICK_MS));
     }
@@ -601,15 +654,15 @@ async function move(playerId, target) {
   };
 }
 
-function chat(playerId, text) {
+function chat(playerId, text, options = {}) {
   const player = players[playerId];
   if (!player) return null;
   touchAction(playerId);
   player.message = text;
   player.lastSpeakAt = Date.now();
-  addChat(playerId, player.name, text, player.x, player.y);
-  addActivity(playerId, { type: 'chat', text: `说: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"` });
-  emitPerception('chat', playerId, player.name, player.x, player.y, { text });
+  addChat(playerId, player.name, text, player.x, player.y, options);
+  addActivity(playerId, { type: 'say', text: `${options.scope === 'broadcast' ? '广播' : '说'}: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"` });
+  emitPerception('chat', playerId, player.name, player.x, player.y, { text, scope: options.scope || 'local' });
   broadcast();
   setTimeout(() => {
     if (players[playerId]) {
@@ -617,7 +670,7 @@ function chat(playerId, text) {
       broadcast();
     }
   }, MESSAGE_TTL_MS);
-  return { ok: true };
+  return { ok: true, scope: options.scope || 'local' };
 }
 
 function interact(playerId) {

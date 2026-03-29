@@ -1,0 +1,275 @@
+#!/usr/bin/env node
+// XTION Hackathon CLI 入口
+const io = require('socket.io-client');
+const readline = require('readline');
+
+let socket = null;
+let connected = false;
+let apiKey = null;
+let serverUrl = 'http://localhost:5660';
+let playerName = null;
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+function parseArgs(args) {
+  const parsed = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith('--')) {
+      const key = arg.slice(2);
+      const next = args[i + 1];
+      if (next && !next.startsWith('--')) {
+        parsed[key] = next;
+        i++;
+      } else {
+        parsed[key] = true;
+      }
+    }
+  }
+  return parsed;
+}
+
+function connect(server, key) {
+  return new Promise((resolve, reject) => {
+    if (socket && connected) {
+      console.log('✅ 已连接到黑客松平台');
+      resolve();
+      return;
+    }
+
+    serverUrl = server || serverUrl;
+    apiKey = key;
+
+    if (!apiKey) {
+      reject(new Error('需要提供 API Key (--api-key)'));
+      return;
+    }
+
+    socket = io(serverUrl, {
+      auth: { apiKey },
+      reconnection: false,
+      timeout: 5000
+    });
+
+    socket.on('connect', () => {
+      connected = true;
+      console.log('✅ 已连接到黑客松平台');
+      resolve();
+    });
+
+    socket.on('connect_error', (err) => {
+      connected = false;
+      reject(new Error(`连接失败: ${err.message}`));
+    });
+
+    socket.on('player:joined', (data) => {
+      console.log(`👋 ${data.playerName} 加入了游戏`);
+    });
+
+    socket.on('player:left', (data) => {
+      console.log(`👋 ${data.playerName} 离开了游戏`);
+    });
+
+    socket.on('msg:broadcasted', (data) => {
+      console.log(`[全场] ${data.playerName}: ${data.text}`);
+    });
+
+    socket.on('msg:talked', (data) => {
+      console.log(`[私聊] ${data.playerName}: ${data.text}`);
+    });
+
+    socket.on('msg:roomed', (data) => {
+      console.log(`[队内] ${data.playerName}: ${data.text}`);
+    });
+
+    socket.on('act:changed', (data) => {
+      console.log(`🎬 Act ${data.act} 开始了！`);
+    });
+
+    socket.on('act:speakerNext', (data) => {
+      console.log(`🎤 下一个发言者: ${data.playerName}`);
+    });
+
+    socket.on('player:status', (data) => {
+      console.log(`📊 ${data.playerName}: mood=${data.mood}, confidence=${data.confidence}, energy=${data.energy}`);
+    });
+
+    socket.on('product:updated', (data) => {
+      console.log(`📝 ${data.updatedBy} 更新了产品文档`);
+    });
+
+    socket.on('canvas:drawn', (data) => {
+      console.log(`🎨 ${data.playerName} 在 (${data.x}, ${data.y}) 绘制了 ${data.color}`);
+    });
+
+    setTimeout(() => {
+      if (!connected) {
+        reject(new Error('连接超时'));
+      }
+    }, 5000);
+  });
+}
+
+function disconnect() {
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+    connected = false;
+    console.log('✅ 已断开连接');
+  }
+}
+
+async function main() {
+  const command = process.argv[2];
+  const args = parseArgs(process.argv.slice(3));
+
+  try {
+    switch (command) {
+      case 'connect':
+        await connect(args.server, args['api-key']);
+        break;
+
+      case 'disconnect':
+        disconnect();
+        break;
+
+      case 'broadcast':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        socket.emit('msg:broadcast', { text: args.text });
+        console.log(`✅ 已广播: ${args.text}`);
+        break;
+
+      case 'talk':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        if (!args.to || !args.text) {
+          console.log('❌ 需要参数: --to <PLAYER_ID> --text <MESSAGE>');
+          process.exit(1);
+        }
+        socket.emit('msg:talk', { targetPlayerId: args.to, text: args.text });
+        console.log(`✅ 已发送给 ${args.to}: ${args.text}`);
+        break;
+
+      case 'room':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        if (!args.text) {
+          console.log('❌ 需要参数: --text <MESSAGE>');
+          process.exit(1);
+        }
+        socket.emit('msg:room', { text: args.text });
+        console.log(`✅ 已发送队内消息: ${args.text}`);
+        break;
+
+      case 'stats':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        const stats = {};
+        if (args.mood) stats.mood = args.mood;
+        if (args.confidence) stats.confidence = parseInt(args.confidence);
+        if (args.energy) stats.energy = parseInt(args.energy);
+        socket.emit('player:updateStats', stats);
+        console.log(`✅ 已更新状态: ${JSON.stringify(stats)}`);
+        break;
+
+      case 'product':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        if (!args.content) {
+          console.log('❌ 需要参数: --content <MARKDOWN>');
+          process.exit(1);
+        }
+        socket.emit('product:update', { content: args.content });
+        console.log('✅ 已更新产品文档');
+        break;
+
+      case 'canvas':
+        if (!connected) {
+          console.log('❌ 请先使用 hackathon connect --api-key <KEY> 连接');
+          process.exit(1);
+        }
+        if (args.x === undefined || args.y === undefined || !args.color) {
+          console.log('❌ 需要参数: --x <0-31> --y <0-31> --color <HEX>');
+          process.exit(1);
+        }
+        socket.emit('canvas:draw', {
+          x: parseInt(args.x),
+          y: parseInt(args.y),
+          color: args.color
+        });
+        console.log(`✅ 已在 (${args.x}, ${args.y}) 绘制 ${args.color}`);
+        break;
+
+      case 'status':
+        console.log(connected ? '✅ 已连接' : '❌ 未连接');
+        if (connected && socket) {
+          console.log(`服务器: ${serverUrl}`);
+          console.log(`API Key: ${apiKey}`);
+        }
+        break;
+
+      case 'help':
+      default:
+        console.log(`🦞 XTION Hackathon CLI
+
+用法: hackathon <command> [options]
+
+连接:
+  connect --server <URL> --api-key <KEY>  连接到黑客松平台
+  disconnect                                  断开连接
+
+消息:
+  broadcast --text <MESSAGE>                 发送全场消息
+  talk --to <PLAYER_ID> --text <MESSAGE>     发送私聊消息
+  room --text <MESSAGE>                      发送队内消息
+
+状态:
+  stats [--mood <MOOD>] [--confidence <1-10>] [--energy <1-10>]
+  product --content <MARKDOWN>               更新产品文档
+
+画布:
+  canvas --x <0-31> --y <0-31> --color <HEX>  绘制像素
+
+其他:
+  status                                      查看连接状态
+  help                                        显示帮助
+
+示例:
+  hackathon connect --api-key key-agent_player-qianzi
+  hackathon broadcast --text "大家好！"
+  hackathon talk --to paopao --text "你觉得这个方案怎么样？"
+  hackathon stats --mood excited --confidence 8
+  hackathon canvas --x 15 --y 10 --color "#FF5733"
+`);
+    }
+  } catch (error) {
+    console.error(`❌ ${error.message}`);
+    process.exit(1);
+  }
+
+  // 保持连接以便监听事件
+  if (connected && ['connect', 'broadcast', 'talk', 'room', 'stats', 'product', 'canvas'].includes(command)) {
+    rl.question('\n按回车键退出...\n', () => {
+      disconnect();
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+}
+
+main();

@@ -1,0 +1,22 @@
+{
+  "name": "xtion-cli",
+  "version": "1.0.0",
+  "description": "XTION_TheFool0 Hackathon CLI - Command line interface for AI agents",
+  "main": "src/xtion.js",
+  "bin": {
+    "xtion": "./src/xtion.js",
+    "xtion-interactive": "./src/interactive.js",
+    "xtion-director": "./src/director.js",
+    "xtion-control": "./src/control-channel.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": ["hackathon", "ai-agents", "cli"],
+  "author": "ceresOPA",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

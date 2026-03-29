@@ -10,6 +10,7 @@ const toolModules = [
   require('./tools/movement'),
   require('./tools/communication'),
   require('./tools/interaction'),
+  require('./tools/hackathon'),
 ];
 
 const allDefinitions = toolModules.flatMap((module) => module.definitions);

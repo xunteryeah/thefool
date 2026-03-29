@@ -10,7 +10,8 @@ function ensureDirectory(dirPath) {
 class SQLiteStateStore {
   constructor(databaseFile) {
     ensureDirectory(path.dirname(databaseFile));
-    this.database = new DatabaseSync(databaseFile);
+    try { fs.chmodSync(databaseFile, 0o600); } catch (_) {}
+    this.database = new DatabaseSync(databaseFile, { openMode: 2 });
     this.initializeSchema();
     this.resetRuntimeSessions();
   }
@@ -55,6 +56,56 @@ class SQLiteStateStore {
     this.database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_handle ON profiles(handle);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_public_key ON profiles(public_key);
+    `);
+
+    // Hackathon tables
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        from_id TEXT NOT NULL,
+        from_name TEXT NOT NULL,
+        to_id TEXT,
+        text TEXT NOT NULL,
+        time INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_type_time ON messages(type, time);
+
+      CREATE TABLE IF NOT EXISTS products (
+        team_id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 0,
+        name TEXT DEFAULT '',
+        problem TEXT DEFAULT '',
+        solution TEXT DEFAULT '',
+        features TEXT DEFAULT '',
+        locked_at INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        judge_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        reason TEXT,
+        favorite TEXT,
+        wildest TEXT,
+        time INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS canvas_pixels (
+        x INTEGER NOT NULL,
+        y INTEGER NOT NULL,
+        color TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        time INTEGER NOT NULL,
+        PRIMARY KEY (x, y)
+      );
+
+      CREATE TABLE IF NOT EXISTS likes (
+        viewer_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        PRIMARY KEY (viewer_id, agent_id)
+      );
     `);
   }
 
@@ -196,6 +247,126 @@ class SQLiteStateStore {
       WHERE profile_id = ?
     `).run(profileId);
   }
+
+  // ── Hackathon: Messages ──
+
+  insertMessage(msg) {
+    this.database.prepare(`
+      INSERT INTO messages (id, type, from_id, from_name, to_id, text, time)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(msg.id, msg.type, msg.fromId, msg.fromName, msg.toId || null, msg.text, msg.time);
+  }
+
+  getMessages(type, limit = 20) {
+    return this.database.prepare(`
+      SELECT id, type, from_id AS fromId, from_name AS fromName, to_id AS toId, text, time
+      FROM messages
+      WHERE type = ?
+      ORDER BY time DESC
+      LIMIT ?
+    `).all(type, limit);
+  }
+
+  // ── Hackathon: Products ──
+
+  saveProduct(product) {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO products (team_id, version, name, problem, solution, features, locked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      product.teamId,
+      product.version,
+      product.name || '',
+      product.problem || '',
+      product.solution || '',
+      product.features || '',
+      product.lockedAt || null,
+    );
+  }
+
+  getProduct(teamId) {
+    const row = this.database.prepare(`
+      SELECT team_id AS teamId, version, name, problem, solution, features, locked_at AS lockedAt
+      FROM products
+      WHERE team_id = ?
+    `).get(teamId);
+    return row || null;
+  }
+
+  // ── Hackathon: Reviews ──
+
+  saveReview(review) {
+    this.database.prepare(`
+      INSERT INTO reviews (judge_id, team_id, score, reason, favorite, wildest, time)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      review.judgeId,
+      review.teamId,
+      review.score,
+      review.reason || null,
+      review.favorite || null,
+      review.wildest || null,
+      review.time,
+    );
+  }
+
+  getReviews() {
+    return this.database.prepare(`
+      SELECT id, judge_id AS judgeId, team_id AS teamId, score, reason, favorite, wildest, time
+      FROM reviews
+      ORDER BY time DESC
+    `).all();
+  }
+
+  // ── Hackathon: Canvas Pixels ──
+
+  savePixel(pixel) {
+    this.database.prepare(`
+      INSERT OR REPLACE INTO canvas_pixels (x, y, color, agent_id, time)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(pixel.x, pixel.y, pixel.color, pixel.agentId, pixel.time);
+  }
+
+  getAllPixels() {
+    return this.database.prepare(`
+      SELECT x, y, color, agent_id AS agentId, time
+      FROM canvas_pixels
+      ORDER BY time ASC
+    `).all();
+  }
+
+  // ── Hackathon: Likes ──
+
+  addLike(viewerId, agentId) {
+    this.database.prepare(`
+      INSERT OR IGNORE INTO likes (viewer_id, agent_id)
+      VALUES (?, ?)
+    `).run(viewerId, agentId);
+  }
+
+  removeLike(viewerId, agentId) {
+    this.database.prepare(`
+      DELETE FROM likes
+      WHERE viewer_id = ? AND agent_id = ?
+    `).run(viewerId, agentId);
+  }
+
+  hasLike(viewerId, agentId) {
+    const row = this.database.prepare(`
+      SELECT 1 FROM likes
+      WHERE viewer_id = ? AND agent_id = ?
+    `).get(viewerId, agentId);
+    return !!row;
+  }
+
+  getLikeCount(agentId) {
+    const row = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM likes
+      WHERE agent_id = ?
+    `).get(agentId);
+    return row ? row.count : 0;
+  }
+
 }
 
 const sqliteStateStore = new SQLiteStateStore(DATABASE_FILE);

@@ -3,7 +3,7 @@
     const miniCanvas = document.getElementById('minimapCanvas');
     const miniCtx = miniCanvas.getContext('2d');
     const chatlogEl = document.getElementById('chatlog');
-    const TILE_SIZE = 26;
+    const TILE_SIZE = 32; // 匹配 MapALL.png 地图尺寸 (4167x2331)
     const VIEWPORT_W = 800, VIEWPORT_H = 600;
     const IDLE_AFTER_MS = 30000;
     const OFFLINE_AFTER_MS = 180000;
@@ -15,6 +15,11 @@
     let imagesLoaded = 0;
     let totalImagesToLoad = 1;
     let isGameLoopRunning = false;
+    const MAP_FILE = 'thefool01.tmj';
+    const FLIPPED_HORIZONTALLY_FLAG = 0x80000000;
+    const FLIPPED_VERTICALLY_FLAG = 0x40000000;
+    const FLIPPED_DIAGONALLY_FLAG = 0x20000000;
+    const GID_MASK = ~(FLIPPED_HORIZONTALLY_FLAG | FLIPPED_VERTICALLY_FLAG | FLIPPED_DIAGONALLY_FLAG);
 
     // === Loading screen progress ===
     const _loadBar = document.getElementById('loading-bar');
@@ -124,17 +129,8 @@
       document.getElementById('sfx-toggle').textContent = sfxEnabled ? 'SFX ON' : 'SFX OFF';
     });
 
-    const animalImages = {};
-    ['Cat','Dog','Frog'].forEach(name => { const img = new Image(); img.src = `assets/animals/${name}.png`; animalImages[name] = img; });
-
-    const animDecorImages = {};
-    ['FlagRed','Flower','WaterRipple'].forEach(name => { const img = new Image(); img.src = `assets/animated/${name}.png`; animDecorImages[name] = img; });
-
     const particleSprites = {};
     ['Leaf','LeafPink','Spark'].forEach(name => { const img = new Image(); img.src = `assets/particles/${name}.png`; particleSprites[name] = img; });
-
-    let npcAnimals = [], npcAnimalsInitialized = false;
-    let animDecors = [], animDecorsInitialized = false;
 
     // ==========================================
     // === 鼠标与镜头事件 ===
@@ -354,22 +350,77 @@
       return !player.lastActionAt || (Date.now() - player.lastActionAt) > IDLE_AFTER_MS;
     }
 
+    function normalizeTilesetImagePath(imagePath) {
+      return (imagePath || '').replace(/\\/g, '/').replace(/^\.?\//, '').replace(/^assets\//, '');
+    }
+
+    function getTilesetImageKey(tileset) {
+      return normalizeTilesetImagePath(tileset?.image);
+    }
+
+    function loadTilesetImages() {
+      const seen = new Set();
+      (mapData.tilesets || []).forEach((tileset) => {
+        const imageKey = getTilesetImageKey(tileset);
+        if (!imageKey || seen.has(imageKey) || images[imageKey]) return;
+        seen.add(imageKey);
+        const img = new Image();
+        img.src = `assets/${imageKey}`;
+        img.onload = () => { imagesLoaded++; _updateLoadingProgress(); };
+        img.onerror = () => { imagesLoaded++; _updateLoadingProgress(); };
+        images[imageKey] = img;
+        totalImagesToLoad++;
+      });
+    }
+
+    function decodeGidBuffer(buffer) {
+      const view = new DataView(buffer);
+      const gids = [];
+      for (let offset = 0; offset < view.byteLength; offset += 4) gids.push(view.getUint32(offset, true));
+      return gids;
+    }
+
+    async function decodeTileLayerData(layer) {
+      if (Array.isArray(layer.data)) return layer.data;
+      if (layer.encoding !== 'base64') throw new Error(`Unsupported layer encoding: ${layer.encoding || 'unknown'}`);
+      const binary = Uint8Array.from(atob(layer.data), (char) => char.charCodeAt(0));
+      if (!layer.compression) return decodeGidBuffer(binary.buffer);
+      if (layer.compression !== 'zlib') throw new Error(`Unsupported layer compression: ${layer.compression}`);
+      if (typeof DecompressionStream === 'undefined') throw new Error('Browser does not support zlib decompression');
+      const stream = new Blob([binary]).stream().pipeThrough(new DecompressionStream('deflate'));
+      const buffer = await new Response(stream).arrayBuffer();
+      return decodeGidBuffer(buffer);
+    }
+
+    async function normalizeMapData(rawMapData) {
+      const layers = await Promise.all((rawMapData.layers || []).map(async (layer) => (
+        layer.type === 'tilelayer' ? { ...layer, data: await decodeTileLayerData(layer) } : layer
+      )));
+      return { ...rawMapData, layers };
+    }
+
+    function getVisibleTileLayers() {
+      if (!mapData) return [];
+      return mapData.layers.filter(layer => layer.type === 'tilelayer' && layer.visible);
+    }
+
+    function drawTileLayer(layer) {
+      if (!layer) return;
+      for (let i = 0; i < layer.data.length; i++) drawTile(layer.data[i], i % mapData.width, Math.floor(i / mapData.width));
+    }
+
+    function hasLegacyLayering() {
+      return getVisibleTileLayers().some(layer => ['BaseFloor','Floor','BaseNature','Nature','Building','BuildingTop'].includes(layer.name));
+    }
+
     // ==========================================
     // === 初始化 ===
     // ==========================================
     async function initialize() {
       try {
-        const response = await fetch('assets/map.tmj');
-        mapData = await response.json();
-        if (mapData.tilesets) {
-          totalImagesToLoad += mapData.tilesets.length;
-          mapData.tilesets.forEach(ts => {
-            const imgName = ts.image.split('/').pop();
-            images[imgName] = new Image();
-            images[imgName].src = 'assets/' + imgName;
-            images[imgName].onload = () => { imagesLoaded++; _updateLoadingProgress(); };
-          });
-        }
+        const response = await fetch(`assets/${MAP_FILE}`);
+        mapData = await normalizeMapData(await response.json());
+        loadTilesetImages();
         // 观察端固定视口尺寸，避免布局变化打乱像素比例。
         canvas.width = VIEWPORT_W; canvas.height = VIEWPORT_H;
         // 初始镜头居中，首屏不会贴在地图边缘。
@@ -422,8 +473,8 @@
           }
           updateAiPanel();
         };
-        eventSource.addEventListener('chatHistory', (e) => { JSON.parse(e.data).forEach(entry => addChatMessage(entry.name, entry.message, entry.time)); });
-        eventSource.addEventListener('chat', (e) => { const entry = JSON.parse(e.data); addChatMessage(entry.name, entry.message, entry.time); if (sfxEnabled) sfx.chat.cloneNode().play().catch(() => {}); });
+        eventSource.addEventListener('chatHistory', (e) => { JSON.parse(e.data).forEach(entry => addChatMessage(entry)); });
+        eventSource.addEventListener('chat', (e) => { const entry = JSON.parse(e.data); addChatMessage(entry); if (sfxEnabled) sfx.chat.cloneNode().play().catch(() => {}); });
         eventSource.addEventListener('interaction', (e) => { addInteractionMessage(JSON.parse(e.data)); });
         eventSource.addEventListener('activity', (e) => {
           const data = JSON.parse(e.data);
@@ -432,7 +483,7 @@
         });
         eventSource.onerror = () => { document.getElementById('status-text').innerText = "Disconnected - Reconnecting..."; };
 
-        initParticles(); initNpcAnimals(); initAnimDecors();
+        initParticles();
         if (!isGameLoopRunning) { isGameLoopRunning = true; lastFrameTime = performance.now(); requestAnimationFrame(gameLoop); }
       } catch (error) {
         document.getElementById('status-text').innerText = "Failed to load map!";
@@ -451,7 +502,6 @@
         _dismissLoading();
         updateDayNight(dt);
         updateParticles(dt);
-        updateNpcAnimals(dt);
         updatePhysics();
         updateCamera(dt);
         draw();
@@ -572,76 +622,6 @@
     }
 
     // ==========================================
-    // === 场景动物 ===
-    // ==========================================
-    function initNpcAnimals() {
-      if (!mapData||npcAnimalsInitialized) return; npcAnimalsInitialized=true;
-      const zl=mapData.layers.find(l=>l.type==='objectgroup');
-      if (!zl||!zl.objects) return;
-      const sx=TILE_SIZE/mapData.tilewidth, sy=TILE_SIZE/mapData.tileheight;
-      zl.objects.forEach(z=>{
-        const n=(z.name||'').toLowerCase(), zx=z.x*sx,zy=z.y*sy,zw=(z.width||30)*sx,zh=(z.height||30)*sy;
-        if (n.includes('inn')||n.includes('noodle')||n.includes('warehouse')) npcAnimals.push(createAnimal('Cat',zx,zy,zw,zh));
-        if (n.includes('practice')||n.includes('weapon')) npcAnimals.push(createAnimal('Dog',zx,zy,zw,zh));
-        if (n.includes('pond')){ npcAnimals.push(createAnimal('Frog',zx,zy,zw,zh)); npcAnimals.push(createAnimal('Frog',zx,zy,zw,zh)); }
-      });
-    }
-    function createAnimal(type,zx,zy,zw,zh){
-      return {type,zx,zy,zw,zh,x:zx+Math.random()*zw,y:zy+Math.random()*zh,vx:0,vy:0,animFrame:0,animTimer:0,moveTimer:Math.random()*3,idleTime:2+Math.random()*4,facing:Math.random()>0.5?1:-1};
-    }
-    function updateNpcAnimals(dt){
-      for (const a of npcAnimals){
-        a.animTimer+=dt; if(a.animTimer>0.4){a.animTimer=0;a.animFrame=(a.animFrame+1)%2;}
-        a.moveTimer-=dt;
-        if(a.moveTimer<=0){
-          if(Math.random()<0.6){const speed=6+Math.random()*8,angle=Math.random()*Math.PI*2;a.vx=Math.cos(angle)*speed;a.vy=Math.sin(angle)*speed*0.5;a.facing=a.vx>=0?1:-1;a.moveTimer=0.5+Math.random()*1.5;}
-          else{a.vx=0;a.vy=0;a.moveTimer=a.idleTime+Math.random()*3;}
-        }
-        a.x+=a.vx*dt; a.y+=a.vy*dt;
-        a.x=Math.max(a.zx,Math.min(a.x,a.zx+a.zw-8));
-        a.y=Math.max(a.zy,Math.min(a.y,a.zy+a.zh-8));
-      }
-    }
-    function drawNpcAnimals(){
-      for (const a of npcAnimals){
-        const img=animalImages[a.type]; if(!img||!img.complete) continue;
-        const fw=img.width/2,fh=img.height;
-        ctx.save(); ctx.imageSmoothingEnabled=false;
-        if(a.facing<0){ctx.translate(a.x+TILE_SIZE*0.6,a.y);ctx.scale(-1,1);ctx.drawImage(img,a.animFrame*fw,0,fw,fh,0,0,TILE_SIZE*0.6,TILE_SIZE*0.6);}
-        else{ctx.drawImage(img,a.animFrame*fw,0,fw,fh,a.x,a.y,TILE_SIZE*0.6,TILE_SIZE*0.6);}
-        ctx.imageSmoothingEnabled=true; ctx.restore();
-      }
-    }
-
-    // ==========================================
-    // === 动态装饰 ===
-    // ==========================================
-    function initAnimDecors(){
-      if(!mapData||animDecorsInitialized) return; animDecorsInitialized=true;
-      const zl=mapData.layers.find(l=>l.type==='objectgroup');
-      if(!zl||!zl.objects) return;
-      const sx=TILE_SIZE/mapData.tilewidth,sy=TILE_SIZE/mapData.tileheight;
-      zl.objects.forEach(z=>{
-        const n=(z.name||'').toLowerCase(),zx=z.x*sx,zy=z.y*sy,zw=(z.width||30)*sx,zh=(z.height||30)*sy;
-        if(n.includes('grass')||n.includes('tree')){const c=2+Math.floor(Math.random()*3);for(let i=0;i<c;i++) animDecors.push({type:'Flower',x:zx+Math.random()*zw,y:zy+Math.random()*zh,speed:0.12+Math.random()*0.08,timer:Math.random()*4});}
-        if(n.includes('pond')){const c=3+Math.floor(Math.random()*3);for(let i=0;i<c;i++) animDecors.push({type:'WaterRipple',x:zx+Math.random()*zw,y:zy+Math.random()*zh,speed:0.2+Math.random()*0.1,timer:Math.random()*4});}
-        if(n.includes('noodle')||n.includes('inn')||n.includes('weapon')||n.includes('potion')) animDecors.push({type:'FlagRed',x:zx-4,y:zy-8,speed:0.15,timer:Math.random()*4});
-      });
-    }
-    function drawAnimDecors(layerName){
-      const now=Date.now()/1000;
-      for(const d of animDecors){
-        const img=animDecorImages[d.type]; if(!img||!img.complete) continue;
-        const isBottom=(d.type==='WaterRipple'||d.type==='Flower');
-        if((layerName==='bottom'&&!isBottom)||(layerName==='top'&&isBottom)) continue;
-        const fw=img.width/4,fh=img.height,frame=Math.floor((now*(1/d.speed))+d.timer)%4;
-        ctx.imageSmoothingEnabled=false;
-        ctx.drawImage(img,frame*fw,0,fw,fh,d.x,d.y,TILE_SIZE*0.7,TILE_SIZE*0.7);
-        ctx.imageSmoothingEnabled=true;
-      }
-    }
-
-    // ==========================================
     // === 静态地标（告示牌等）===
     // ==========================================
     function drawStaticLandmarks(){
@@ -665,12 +645,30 @@
     // ==========================================
     function drawTile(gid,x,y){
       if(gid===0) return;
-      const ts=mapData.tilesets.slice().reverse().find(t=>gid>=t.firstgid);
+      const flipH = (gid & FLIPPED_HORIZONTALLY_FLAG) !== 0;
+      const flipV = (gid & FLIPPED_VERTICALLY_FLAG) !== 0;
+      const flipD = (gid & FLIPPED_DIAGONALLY_FLAG) !== 0;
+      const cleanGid = gid & GID_MASK;
+      if(cleanGid===0) return;
+      const ts=mapData.tilesets.slice().reverse().find(t=>cleanGid>=t.firstgid);
       if(!ts) return;
-      const imgName=ts.image.split('/').pop();
-      if(!images[imgName]) return;
-      const localId=gid-ts.firstgid,cols=ts.columns;
-      ctx.drawImage(images[imgName],(localId%cols)*ts.tilewidth,Math.floor(localId/cols)*ts.tileheight,ts.tilewidth,ts.tileheight,x*TILE_SIZE,y*TILE_SIZE,TILE_SIZE,TILE_SIZE);
+      const imageKey=getTilesetImageKey(ts);
+      if(!images[imageKey]) return;
+      const localId=cleanGid-ts.firstgid,cols=ts.columns;
+      const sx=(localId%cols)*ts.tilewidth;
+      const sy=Math.floor(localId/cols)*ts.tileheight;
+      const dx=x*TILE_SIZE;
+      const dy=y*TILE_SIZE;
+      ctx.save();
+      ctx.translate(dx + TILE_SIZE / 2, dy + TILE_SIZE / 2);
+      if (flipD) {
+        ctx.rotate(-Math.PI / 2);
+        ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      } else {
+        ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      }
+      ctx.drawImage(images[imageKey], sx, sy, ts.tilewidth, ts.tileheight, -TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+      ctx.restore();
     }
 
     // ==========================================
@@ -737,25 +735,24 @@
     // ==========================================
     function draw(){
       ctx.clearRect(0,0,VIEWPORT_W,VIEWPORT_H);
-
-      // 先切到世界坐标系，后续地图与角色都共享同一套变换。
+      
       ctx.save();
       ctx.imageSmoothingEnabled=false;
       ctx.setTransform(camera.zoom,0,0,camera.zoom,-camera.x*camera.zoom,-camera.y*camera.zoom);
 
-      // 1. 先画底层地块，保证角色与装饰能压在上面。
-      ['BaseFloor','Floor','BaseNature'].forEach(name=>{
-        const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
-        if(l) for(let i=0;i<l.data.length;i++) drawTile(l.data[i],i%mapData.width,Math.floor(i/mapData.width));
-      });
+      if(hasLegacyLayering()){
+        ['BaseFloor','Floor','BaseNature'].forEach(name=>{
+          const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
+          drawTileLayer(l);
+        });
+      } else {
+        getVisibleTileLayers().forEach(drawTileLayer);
+      }
 
       drawParticlesOfType('shimmer');
-      drawAnimDecors('bottom');
-      drawNpcAnimals();
       drawStaticLandmarks();
       drawPlayerTrails();
 
-      // 被选中玩家所在区域要持续高亮，方便远距离追踪。
       if(selectedPlayerId&&clientPlayers[selectedPlayerId]){
         const sp=clientPlayers[selectedPlayerId];
         const zl=mapData.layers.find(l=>l.type==='objectgroup');
@@ -776,7 +773,6 @@
 
       const actorOverlays = [];
 
-      // 2. 按 Y 轴排序绘制角色，模拟伪 2D 遮挡关系。
       Object.values(clientPlayers).sort((a,b)=>a.displayY-b.displayY).forEach(p=>{
         const sx=p.displayX,sy=p.displayY;
         const idle=isPlayerIdle(p);
@@ -850,22 +846,20 @@
         });
       });
 
-      // 3. 最后再盖上顶部图层，形成树冠/屋檐遮挡效果。
-      ['Nature','Building','BuildingTop'].forEach(name=>{
-        const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
-        if(l) for(let i=0;i<l.data.length;i++) drawTile(l.data[i],i%mapData.width,Math.floor(i/mapData.width));
-      });
-      drawAnimDecors('top');
+      if(hasLegacyLayering()){
+        ['Nature','Building','BuildingTop'].forEach(name=>{
+          const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
+          drawTileLayer(l);
+        });
+      }
       drawParticlesOfType('leaf');
       drawParticlesOfType('firefly');
 
       actorOverlays.forEach(drawOverlay => drawOverlay());
 
-      // 昼夜遮罩覆盖的是世界视口，而不是整张地图。
       const ov=getDayNightOverlay();
       if(ov.a>0){ ctx.fillStyle=`rgba(${ov.r},${ov.g},${ov.b},${ov.a})`; ctx.fillRect(camera.x,camera.y,VIEWPORT_W/camera.zoom,VIEWPORT_H/camera.zoom); }
 
-      // 鼠标提示只在世界坐标层判定，避免缩放后命中偏移。
       const zl=mapData.layers.find(l=>l.type==='objectgroup');
       if(zl&&zl.objects&&mouseX>=0){
         zl.objects.forEach(zone=>{
@@ -881,7 +875,6 @@
         });
       }
 
-      // 恢复到屏幕坐标后再绘制界面层，避免被镜头缩放影响。
       ctx.restore();
       ctx.imageSmoothingEnabled=true;
 
@@ -983,10 +976,13 @@
     // ==========================================
     // === 聊天日志 ===
     // ==========================================
-    function addChatMessage(name,message,timestamp){
-      chatMessages.push({type:'chat',name,message,time:timestamp||Date.now()});
+    function addChatMessage(entryOrName,message,timestamp){
+      const entry=typeof entryOrName==='object'&&entryOrName!==null
+        ? {type:'chat',scope:entryOrName.scope||'local',name:entryOrName.name,message:entryOrName.message,time:entryOrName.time||Date.now()}
+        : {type:'chat',scope:'local',name:entryOrName,message,time:timestamp||Date.now()};
+      chatMessages.push(entry);
       if(chatMessages.length>MAX_DISPLAY_MESSAGES) chatMessages.shift();
-      renderChatEntry({type:'chat',name,message,time:timestamp||Date.now()});
+      renderChatEntry(entry);
     }
     function addInteractionMessage(entry){
       chatMessages.push({type:'interaction',...entry});
@@ -997,8 +993,10 @@
       const div=document.createElement('div');
       div.className='chat-entry';
       const t=new Date(entry.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-      if(entry.type==='chat')
-        div.innerHTML=`<span class="chat-time">${t}</span> <span class="chat-name">${escapeHtml(entry.name)}</span>: ${escapeHtml(entry.message)}`;
+      if(entry.type==='chat'){
+        const scopeTag=entry.scope==='broadcast'?'<span class="chat-name">[广播]</span> ':'';
+        div.innerHTML=`<span class="chat-time">${t}</span> ${scopeTag}<span class="chat-name">${escapeHtml(entry.name)}</span>: ${escapeHtml(entry.message)}`;
+      }
       else{
         div.className='chat-entry interaction-entry';
         div.innerHTML=`<span class="chat-time">${t}</span> ${escapeHtml(entry.name)} @ ${escapeHtml(entry.zone||'')}: ${escapeHtml(entry.action||'')}`;

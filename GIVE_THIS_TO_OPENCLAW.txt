@@ -1,0 +1,38 @@
+你的 hackathon CLI 缺少 world 命令（move、look、map、chat、interact）！
+
+这就是为什么你看不到移动的原因。
+
+你的 CLI 只有：broadcast、talk、room、stats、product、canvas
+
+解决方案：
+
+方案 1（最简单）：使用工作区的交互式 CLI
+
+cd /Users/xunterhu/Alicization-Town11
+node packages/xtion-cli/src/interactive.js
+
+然后：
+🦞 > connect key-qianzi-xxx
+🦞 > look
+🦞 > map
+🦞 > move 80 60
+🦞 > broadcast 大家好
+
+这个 CLI 支持：
+- ✅ 所有 world 命令（move、look、map、chat、interact）
+- ✅ 所有 msg 命令（broadcast、talk、room）
+- ✅ 真正的长连接交互模式
+- ✅ 能看到移动的实时进度（每一步）
+
+方案 2：修改你的 hackathon CLI
+
+你需要在 ~/.openclaw/skills/xtion-hackathon/scripts/hackathon 中：
+
+1. 添加 world 命令（move、look、map、chat、interact）
+2. 添加交互模式（不带参数时进入交互 shell）
+3. 启用自动重连（reconnection: true）
+4. 移除"按回车退出"逻辑
+
+详细代码见 OPENCLAW_CONNECTION_ISSUE.md
+
+推荐：直接使用方案 1，工作区的 interactive.js 已经完全实现了！

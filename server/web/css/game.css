@@ -2,11 +2,11 @@
 
 :root {
   --layout-gap: 10px;
-  --game-shell-width: 812px;
+  --game-shell-width: 800px;
   --game-shell-height: 612px;
-  --sidebar-width: 260px;
-  --detail-panel-height: 180px;
-  --stack-panel-max-width: 600px;
+  --left-panel-width: 260px;
+  --right-panel-width: 300px;
+  --panel-item-height: 197px;
 }
 
 /* ============================================================
@@ -31,35 +31,38 @@ h1 { margin-bottom: 2px; color: #4a8e53; text-shadow: 2px 2px 0px #d4e6d6; font-
 #status-text { color: #9aa899; margin-top: 0; font-size: 16px; margin-bottom: 6px; }
 
 /* ============================================================
-   PAGE WRAPPER — stable shell width, independent from chat content
+   PAGE WRAPPER — 3-column layout: left panel, game, right panel
    ============================================================ */
 #page-wrapper {
   display: flex;
-  flex-direction: column;
-  width: min(100%, calc(var(--game-shell-width) + var(--sidebar-width) + var(--layout-gap)));
-  max-width: 100%;
+  flex-direction: row;
+  align-items: flex-start;
   gap: var(--layout-gap);
+  width: min(100%, calc(var(--left-panel-width) + var(--game-shell-width) + var(--right-panel-width) + 2 * var(--layout-gap)));
+  max-width: 100%;
   min-width: 0;
 }
 
-/* ============================================================
-   MAIN LAYOUT — game canvas + sidebar
-   ============================================================ */
 #page-wrapper > * {
   min-width: 0;
 }
 
-#main-layout {
+/* ============================================================
+   LEFT PANEL — minimap, AI online, stats
+   ============================================================ */
+#left-panel {
+  width: var(--left-panel-width);
+  flex: 0 0 var(--left-panel-width);
   display: flex;
-  gap: var(--layout-gap);
-  align-items: stretch;
-  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  height: var(--game-shell-height);
+  overflow: hidden;
   min-width: 0;
 }
 
 #game-container {
   position: relative;
-  display: inline-block;
   flex: 0 0 var(--game-shell-width);
   width: var(--game-shell-width);
   max-width: 100%;
@@ -103,29 +106,11 @@ canvas {
   pointer-events: none;
 }
 
-/* ============================================================
-   SIDEBAR — keeps original top-right column semantics
-   ============================================================ */
-#side-panel {
-  width: var(--sidebar-width);
-  flex: 0 0 var(--sidebar-width);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-self: stretch;
-  max-height: var(--game-shell-height);
-  overflow: hidden;
-  min-width: 0;
-}
-
-#side-panel > * {
-  min-width: 0;
-}
-
 /* --- Minimap --- */
 #minimap-container {
   background: rgba(40,40,60,0.9); border: 3px solid #c8a165; border-radius: 10px;
   padding: 8px; text-align: center; flex-shrink: 0;
+  height: var(--panel-item-height);
 }
 #minimap-container h3 { color: #ffeaa7; font-size: 14px; margin-bottom: 4px; }
 #minimapCanvas {
@@ -135,8 +120,9 @@ canvas {
 /* --- AI Online panel --- */
 #ai-panel-container {
   background: rgba(40,40,60,0.9); border: 3px solid #c8a165; border-radius: 10px;
-  padding: 8px; flex: 2; min-height: 0;
+  padding: 8px; min-height: 0;
   display: flex; flex-direction: column;
+  height: var(--panel-item-height);
 }
 #ai-panel-container h3 { color: #ffeaa7; font-size: 14px; margin-bottom: 4px; flex-shrink: 0; }
 #ai-panel-header { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
@@ -209,7 +195,8 @@ canvas {
 /* --- Stats panel --- */
 #stats-panel {
   background: rgba(40,40,60,0.9); border: 3px solid #a29bfe; border-radius: 10px;
-  padding: 8px; flex: 1; min-height: 0;
+  padding: 8px; min-height: 0;
+  height: var(--panel-item-height);
 }
 #stats-content { min-width: 0; }
 #stats-panel h3 { color: #a29bfe; font-size: 14px; margin-bottom: 6px; }
@@ -225,26 +212,32 @@ canvas {
 #stats-empty { color: #636e72; font-size: 11px; font-style: italic; }
 
 /* ============================================================
-   DETAIL PANELS — preserve original bottom dual-pane layout
+   RIGHT PANEL — activity detail + chat log (vertical list)
    ============================================================ */
-#bottom-panel {
+#right-panel {
+  width: var(--right-panel-width);
+  flex: 0 0 var(--right-panel-width);
   display: flex;
-  gap: var(--layout-gap);
-  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  height: var(--game-shell-height);
+  overflow: hidden;
   min-width: 0;
-  align-items: stretch;
+}
+
+#right-panel > * {
+  min-width: 0;
 }
 
 /* --- Activity detail (hidden by default) --- */
 #activity-detail {
   display: none;
   background: rgba(40,40,60,0.95); border: 3px solid #74b9ff;
-  border-radius: 10px; padding: 8px; height: var(--detail-panel-height);
-  flex: 1 1 0;
-  width: 0;
+  border-radius: 10px; padding: 8px;
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  height: var(--panel-item-height);
 }
 #activity-detail.visible { display: flex; }
 #activity-detail h3 { color: #74b9ff; font-size: 14px; margin-bottom: 4px; flex-shrink: 0; }
@@ -271,15 +264,14 @@ canvas {
 .activity-type-interact { color: #fdcb6e; }
 .activity-type-join { color: #00b894; }
 
-/* --- Chat log --- */
+/* --- Chat log (vertical list) --- */
 #chatlog-container {
   background: rgba(40,40,60,0.9); border: 3px solid #c8a165; border-radius: 10px;
-  padding: 8px; height: var(--detail-panel-height);
-  flex: 1 1 0;
-  width: 0;
+  padding: 8px;
   display: flex; flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  height: var(--game-shell-height);
 }
 #chatlog-container h3 { color: #ffeaa7; font-size: 14px; margin-bottom: 4px; flex-shrink: 0; }
 
@@ -332,23 +324,41 @@ canvas {
 /* ============================================================
    MOBILE RESPONSIVE
    ============================================================ */
-@media (max-width: 1120px) {
+@media (max-width: 1400px) {
+  #page-wrapper {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  #left-panel {
+    order: 2;
+    width: 100%;
+    max-width: calc(var(--game-shell-width) + var(--right-panel-width) + var(--layout-gap));
+    flex-direction: row;
+    max-height: none;
+  }
+  #left-panel > * { flex: 1 1 0; }
+  #minimap-container { display: none; }
+  #game-container { order: 1; }
+  #right-panel {
+    order: 3;
+    width: 100%;
+    max-width: calc(var(--game-shell-width) + var(--right-panel-width) + var(--layout-gap));
+    flex-direction: row;
+    max-height: none;
+  }
+  #right-panel > * { flex: 1 1 0; }
+}
+
+@media (max-width: 900px) {
   body { padding: 6px; }
   h1 { font-size: 20px; }
   #status-text { font-size: 13px; }
-  #page-wrapper { width: 100%; gap: 8px; }
-  #main-layout { flex-direction: column; align-items: center; }
+  #page-wrapper { width: 100%; gap: 8px; flex-direction: column; align-items: center; }
   #game-container { width: 100%; flex: none; }
   #game-container canvas { width: 100% !important; height: auto !important; display: block; }
-  #side-panel { width: 100%; max-width: var(--stack-panel-max-width); max-height: none; flex: none; align-self: center; }
-  #bottom-panel { flex-direction: column; align-items: center; }
-  #activity-detail,
-  #chatlog-container {
-    width: 100%;
-    flex: none;
-    max-width: var(--stack-panel-max-width);
-  }
-  #minimap-container { display: none; }
+  #left-panel { width: 100%; max-width: 100%; flex-direction: column; }
+  #right-panel { width: 100%; max-width: 100%; flex-direction: column; }
+  #minimap-container { display: block; }
   #zoom-hint { font-size: 10px; padding: 2px 8px; }
   .zoom-btn { width: 44px; height: 44px; }
   .zoom-btn svg { width: 22px; height: 22px; }

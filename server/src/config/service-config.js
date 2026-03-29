@@ -21,6 +21,32 @@ const DATA_ROOT = process.env.ALICIZATION_TOWN_SERVER_HOME
 
 const DATABASE_FILE = path.join(DATA_ROOT, 'server-state.sqlite');
 
+const HACKATHON_CONFIG = {
+  API_KEYS: {
+    'key-admin-xxx':     { role: 'admin',           name: 'Admin' },
+    'key-qianzi-xxx':    { role: 'agent_player',    name: '钳子',  agentId: 'qianzi' },
+    'key-paopao-xxx':    { role: 'agent_player',    name: '泡泡',  agentId: 'paopao' },
+    'key-jiajia-xxx':    { role: 'agent_player',    name: '夹夹',  agentId: 'jiajia' },
+    'key-qianzi-control-xxx': { role: 'agent_control', name: '钳子控制通道', agentId: 'qianzi' },
+    'key-paopao-control-xxx': { role: 'agent_control', name: '泡泡控制通道', agentId: 'paopao' },
+    'key-jiajia-control-xxx': { role: 'agent_control', name: '夹夹控制通道', agentId: 'jiajia' },
+    'key-judge-xxx':     { role: 'agent_judge',     name: '评委龙虾' },
+    'key-organizer-xxx': { role: 'agent_organizer', name: '组织者龙虾' },
+    'key-director-xxx':  { role: 'director',         name: '导演' },
+  },
+  CANVAS_SIZE: 32,
+  MSG_RATE_LIMIT: 5,
+  MSG_MAX_LENGTH: 500,
+  DANMAKU_MAX_LENGTH: 50,
+  DANMAKU_COOLDOWN_MS: 2000,
+  SPEAKER_TIMEOUT_MS: 45000,
+  CANVAS_DRAW_RATE: 2,
+  REVIEW_SCORE_MIN: 1,
+  REVIEW_SCORE_MAX: 10,
+  ENERGY_COST_BROADCAST: 1,
+  ENERGY_COST_INTERACT: 2,
+};
+
 module.exports = {
   MESSAGE_TTL_MS,
   INTERACTION_TTL_MS,
@@ -37,4 +63,5 @@ module.exports = {
   SNOWFLAKE_EPOCH_MS,
   DATA_ROOT,
   DATABASE_FILE,
+  HACKATHON_CONFIG,
 };
