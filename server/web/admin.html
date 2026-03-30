@@ -150,6 +150,7 @@
 
   // --- Act definitions ---
   var ACT_NAMES = {
+    0: '普通交流状态',
     1: '自我介绍', 2: '组队偏好', 3: '分组', 4: '产品讨论',
     5: '产品打磨', 6: '人类代言', 7: 'AI 评审', 8: '颁奖',
     9: '共创画布', 10: '闭幕'
@@ -166,7 +167,7 @@
 
   // --- Create act buttons ---
   var actBar = document.querySelector('.act-bar');
-  for (var i = 1; i <= 10; i++) {
+  for (var i = 0; i <= 10; i++) {
     var btn = document.createElement('button');
     btn.className = 'act-btn';
     btn.textContent = i;
@@ -207,7 +208,9 @@
     if (!data) return;
     currentActNum = data.act || 0;
     var name = data.name || ACT_NAMES[currentActNum] || '';
-    $currentAct.textContent = '当前: 第' + currentActNum + '幕 — ' + name;
+    $currentAct.textContent = currentActNum === 0
+      ? '当前: 第0幕 — ' + name
+      : '当前: 第' + currentActNum + '幕 — ' + name;
     // Highlight active button
     var btns = document.querySelectorAll('.act-btn');
     for (var i = 0; i < btns.length; i++) {

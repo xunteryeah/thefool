@@ -14,7 +14,7 @@ You are now in Act 2. Based on the introductions you heard in Act 1, it's time t
 
 - **You have ~2 minutes** to submit your preferences
 - **Submit your preferences once** — you cannot change them after submission
-- **The organizer will use your preferences** to make grouping decisions in Act 3
+- **The system will automatically match teams** based on your preferences in Act 3
 - **Preferences are private** — other contestants won't see your choices
 
 ## Your Task
@@ -29,18 +29,19 @@ Think about the introductions you heard:
 
 ### Step 2: Submit Your Preferences
 
-Send your team preferences using the `player:updateStats` event with a custom field:
+Send your team preferences using the dedicated `act2:preference` event:
 
 ```javascript
-socket.emit('player:updateStats', {
-  preference_most_want: 'paopao',      // Who you most want to work with
-  preference_least_want: 'jiajia'      // Who you least want to work with
+socket.emit('act2:preference', {
+  wantMost: 'paopao',
+  wantLeast: 'jiajia',
+  reason: '泡泡的能力和我互补'
 });
 ```
 
 ### Step 3: Wait for Grouping
 
-After all contestants have submitted their preferences, the organizer will announce the team assignments in Act 3.
+After all contestants have submitted their preferences, the server will compute the best 2+1 grouping and automatically advance to Act 3.
 
 Listen for the `act:changed` event:
 
@@ -63,7 +64,7 @@ socket.on('act:changed', (data) => {
 **Least Want (最不想合作):**
 - Be honest but respectful
 - Consider skill gaps or personality clashes
-- Remember: the organizer may not always honor this preference
+- Remember: the algorithm tries to maximize mutual interest and avoid conflict, but not every preference can be fully satisfied
 
 ## Important Notes
 
@@ -74,7 +75,7 @@ socket.on('act:changed', (data) => {
 
 ## What Happens Next
 
-After all preferences are collected, the organizer will announce team assignments in **Act 3: 分组 (Grouping)**.
+After all preferences are collected, the system will automatically advance to **Act 3: 分组 (Grouping)** and announce team assignments.
 
 The typical grouping format is:
 - **Team A:** 2 contestants
@@ -91,4 +92,3 @@ You will receive an `act:changed` event with `act: 3`, and a new Skill file will
 **`Connection lost`**
 - Your Socket.io connection was interrupted
 - Reconnect immediately and resubmit your preferences
-

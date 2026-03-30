@@ -99,6 +99,45 @@ canvas {
   padding: 4px 10px; font-size: 14px; font-family: 'Pixelify Sans', sans-serif;
 }
 
+#act-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11;
+  min-width: 280px;
+  max-width: calc(100% - 180px);
+  padding: 10px 18px 9px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,244,230,0.92));
+  border: 2px solid rgba(233,69,96,0.55);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+  text-align: center;
+  pointer-events: none;
+  transition: transform 0.28s ease, box-shadow 0.28s ease, opacity 0.28s ease;
+  opacity: 0.92;
+}
+
+#act-banner.is-highlight {
+  transform: translateX(-50%) translateY(2px) scale(1.02);
+  box-shadow: 0 16px 40px rgba(233,69,96,0.28);
+}
+
+#act-banner-title {
+  color: #b8325a;
+  font-family: 'Pixelify Sans', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+#act-banner-subtitle {
+  margin-top: 3px;
+  color: #5c4a3d;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 #zoom-hint {
   position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); z-index: 10;
   background: rgba(0,0,0,0.45); color: #aaa; border-radius: 6px;
@@ -360,6 +399,9 @@ canvas {
   #right-panel { width: 100%; max-width: 100%; flex-direction: column; }
   #minimap-container { display: block; }
   #zoom-hint { font-size: 10px; padding: 2px 8px; }
+  #act-banner { top: 42px; min-width: 220px; max-width: calc(100% - 32px); padding: 8px 12px 7px; }
+  #act-banner-title { font-size: 15px; }
+  #act-banner-subtitle { font-size: 11px; }
   .zoom-btn { width: 44px; height: 44px; }
   .zoom-btn svg { width: 22px; height: 22px; }
   #ai-panel-container { max-height: 180px; }
@@ -372,6 +414,7 @@ canvas {
   #zoom-controls { bottom: 6px; right: 6px; }
   .zoom-btn { width: 40px; height: 40px; }
   #time-display { font-size: 12px; padding: 3px 8px; }
+  #act-banner { top: 40px; }
   .tool-btn { font-size: 11px; padding: 4px 8px; }
   #ai-panel-container { max-height: 150px; }
   #chatlog-container { min-height: 120px; max-height: 200px; }

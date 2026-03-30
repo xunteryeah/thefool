@@ -47,6 +47,8 @@ const controlMgr = new ControlMgr(io);
 const msgRouter = new MsgRouter(io, sqliteStateStore);
 msgRouter.setActEngine(actEngine);
 msgRouter.setWorldEngine(worldEngine);
+actEngine.setMsgRouter(msgRouter);
+actEngine.setWorldEngine(worldEngine);
 
 const roomMgr = RoomMgr ? new RoomMgr(io) : null;
 const playerMgr = PlayerMgr ? new PlayerMgr(io, sqliteStateStore) : null;
@@ -96,6 +98,9 @@ app.get('/events', (req, res) => {
   sseClients.push({ id: clientId, res });
   console.log(`📺 观察者已连接 (ID: ${clientId})`);
 
+  res.write(`event: act:changed\ndata: ${JSON.stringify(actEngine.getState())}\n\n`);
+  res.write(`event: act:scene\ndata: ${JSON.stringify(actEngine.getState().scene || { active: false, mode: 'free' })}\n\n`);
+
   req.on('close', () => {
     sseClients = sseClients.filter(c => c.id !== clientId);
     console.log(`👋 观察者已断开 (ID: ${clientId})`);
@@ -110,6 +115,8 @@ function broadcastSSE(eventName, data) {
 
 const SSE_FORWARDED_EVENTS = new Set([
   'act:changed',
+  'act:scene',
+  'act:speakerNext',
   'msg:broadcasted',
   'player:statsChanged',
   'player:likesChanged',

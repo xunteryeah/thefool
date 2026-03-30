@@ -59,35 +59,7 @@ class MsgRouter {
       }
     }
 
-    const msg = {
-      id: crypto.randomUUID(),
-      type: 'broadcast',
-      from: socket.identity.name,
-      fromName: socket.identity.name,
-      fromId: socket.identity.agentId || socket.id,
-      text,
-      time: Date.now(),
-    };
-
-    // Persist to SQLite
-    this.db.insertMessage({
-      id: msg.id,
-      type: msg.type,
-      fromId: msg.fromId,
-      fromName: msg.from,
-      toId: null,
-      text: msg.text,
-      time: msg.time,
-    });
-
-    // Send to each connected socket with correct isSelf
-    const sockets = this.io.sockets.sockets;
-    for (const [, s] of sockets) {
-      const isSelf = (s.identity && (s.identity.agentId || s.id)) === msg.fromId;
-      s.emit('msg:broadcasted', { ...msg, isSelf });
-    }
-
-    this._syncSpeechToWorld(msg.fromId, msg.text, { scope: 'broadcast' });
+    this._broadcastAs(socket.identity.agentId || socket.id, socket.identity.name, text);
 
     // Energy consumption: broadcast costs 1 energy for agent_player
     if (this._playerMgr && socket.identity && socket.identity.role === 'agent_player') {
@@ -231,37 +203,23 @@ class MsgRouter {
       return;
     }
 
-    const msg = {
-      id: crypto.randomUUID(),
-      type: 'broadcast',
-      from: AGENT_NAMES[agentId],
-      fromName: AGENT_NAMES[agentId],
-      fromId: agentId,
-      text,
-      time: Date.now(),
+    this._broadcastAs(agentId, AGENT_NAMES[agentId], text, {
       humanProxy: true,
       isProxy: true,
-    };
-
-    // Persist
-    this.db.insertMessage({
-      id: msg.id,
-      type: msg.type,
-      fromId: msg.fromId,
-      fromName: msg.from,
-      toId: null,
-      text: msg.text,
-      time: msg.time,
     });
+  }
 
-    // Broadcast to all with isSelf based on agentId
-    const sockets = this.io.sockets.sockets;
-    for (const [, s] of sockets) {
-      const isSelf = (s.identity && s.identity.agentId) === agentId;
-      s.emit('msg:broadcasted', { ...msg, isSelf });
+  broadcastScripted(agentId, text, extras = {}) {
+    if (!VALID_AGENT_IDS.includes(agentId)) {
+      return false;
     }
-
-    this._syncSpeechToWorld(agentId, msg.text, { scope: 'broadcast' });
+    if (!this._checkLength(text)) return false;
+    this._broadcastAs(agentId, AGENT_NAMES[agentId], text, {
+      scripted: true,
+      stageScene: 'act1-intro',
+      ...extras,
+    });
+    return true;
   }
 
   /**
@@ -309,6 +267,37 @@ class MsgRouter {
   _syncSpeechToWorld(playerId, text, options = {}) {
     if (!this._worldEngine || !playerId || typeof text !== 'string' || !text.trim()) return;
     this._worldEngine.chat(playerId, text, options);
+  }
+
+  _broadcastAs(fromId, fromName, text, extras = {}) {
+    const msg = {
+      id: crypto.randomUUID(),
+      type: 'broadcast',
+      from: fromName,
+      fromName,
+      fromId,
+      text,
+      time: Date.now(),
+      ...extras,
+    };
+
+    this.db.insertMessage({
+      id: msg.id,
+      type: msg.type,
+      fromId: msg.fromId,
+      fromName: msg.from,
+      toId: null,
+      text: msg.text,
+      time: msg.time,
+    });
+
+    const sockets = this.io.sockets.sockets;
+    for (const [, s] of sockets) {
+      const isSelf = (s.identity && (s.identity.agentId || s.id)) === msg.fromId;
+      s.emit('msg:broadcasted', { ...msg, isSelf });
+    }
+
+    this._syncSpeechToWorld(msg.fromId, msg.text, { scope: 'broadcast' });
   }
 }
 

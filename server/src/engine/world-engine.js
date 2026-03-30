@@ -474,6 +474,7 @@ function join(playerId, name, sprite, options = {}) {
     lastHeartbeatAt: now,
     lastActionAt: options.trackActivity === false ? null : now,
     lastChatCursor: nextChatCursor,
+    messageExpiresAt: 0,
   };
   addActivity(playerId, { type: 'join', text: `加入了小镇 (角色: ${assignedSprite})` });
   emitPerception('join', playerId, name, spawnX, spawnY, { sprite: assignedSprite });
@@ -660,13 +661,15 @@ function chat(playerId, text, options = {}) {
   touchAction(playerId);
   player.message = text;
   player.lastSpeakAt = Date.now();
+  player.messageExpiresAt = Date.now() + MESSAGE_TTL_MS;
   addChat(playerId, player.name, text, player.x, player.y, options);
   addActivity(playerId, { type: 'say', text: `${options.scope === 'broadcast' ? '广播' : '说'}: "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"` });
   emitPerception('chat', playerId, player.name, player.x, player.y, { text, scope: options.scope || 'local' });
   broadcast();
   setTimeout(() => {
-    if (players[playerId]) {
+    if (players[playerId] && (players[playerId].messageExpiresAt || 0) <= Date.now()) {
       players[playerId].message = '';
+      players[playerId].messageExpiresAt = 0;
       broadcast();
     }
   }, MESSAGE_TTL_MS);

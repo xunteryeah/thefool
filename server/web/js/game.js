@@ -84,6 +84,12 @@
     const activityDetailEl = document.getElementById('activity-detail');
     const activityDetailNameEl = document.getElementById('activity-detail-name');
     const activityLogEl = document.getElementById('activity-log');
+    const actBannerEl = document.getElementById('act-banner');
+    const actBannerTitleEl = document.getElementById('act-banner-title');
+    const actBannerSubtitleEl = document.getElementById('act-banner-subtitle');
+    let currentActState = { act: 0, name: '普通交流状态' };
+    let currentActScene = { active: false, mode: 'free' };
+    let actBannerHighlightTimer = null;
 
     // === 背景音乐 ===
     const bgm = new Audio('assets/musics/36-Village.ogg');
@@ -476,6 +482,26 @@
         eventSource.addEventListener('chatHistory', (e) => { JSON.parse(e.data).forEach(entry => addChatMessage(entry)); });
         eventSource.addEventListener('chat', (e) => { const entry = JSON.parse(e.data); addChatMessage(entry); if (sfxEnabled) sfx.chat.cloneNode().play().catch(() => {}); });
         eventSource.addEventListener('interaction', (e) => { addInteractionMessage(JSON.parse(e.data)); });
+        eventSource.addEventListener('act:changed', (e) => {
+          currentActState = JSON.parse(e.data) || { act: 0, name: '普通交流状态' };
+          if (currentActState.act !== 1) {
+            currentActScene = { active: false, mode: 'free' };
+          }
+          refreshActBanner(true);
+        });
+        eventSource.addEventListener('act:scene', (e) => {
+          currentActScene = JSON.parse(e.data) || { active: false, mode: 'free' };
+          if (currentActScene.active && currentActScene.agentId) {
+            selectedPlayerId = currentActScene.agentId;
+          }
+          refreshActBanner(false);
+        });
+        eventSource.addEventListener('act:speakerNext', (e) => {
+          const data = JSON.parse(e.data);
+          if (data && data.currentSpeaker) {
+            selectedPlayerId = data.currentSpeaker;
+          }
+        });
         eventSource.addEventListener('activity', (e) => {
           const data = JSON.parse(e.data);
           playerActivityData[data.id] = data.activities || [];
@@ -489,6 +515,50 @@
         document.getElementById('status-text').innerText = "Failed to load map!";
         console.error("Load error:", error);
       }
+    }
+
+    function refreshActBanner(shouldPulse) {
+      if (!actBannerTitleEl || !actBannerSubtitleEl) return;
+      const actName = currentActState.name || `Act ${currentActState.act}`;
+      actBannerTitleEl.textContent = `第${currentActState.act}幕 · ${actName}`;
+      actBannerSubtitleEl.textContent = buildActSubtitle();
+      if (actBannerEl && shouldPulse) {
+        actBannerEl.classList.remove('is-highlight');
+        void actBannerEl.offsetWidth;
+        actBannerEl.classList.add('is-highlight');
+        clearTimeout(actBannerHighlightTimer);
+        actBannerHighlightTimer = setTimeout(() => {
+          actBannerEl.classList.remove('is-highlight');
+        }, 1400);
+      }
+    }
+
+    function buildActSubtitle() {
+      if (currentActState.act === 0) {
+        return '自由移动、自由广播、普通交流对话';
+      }
+      if (currentActState.act === 1 && currentActScene && currentActScene.active) {
+        if (currentActScene.phase === 'focus' && currentActScene.agentId) {
+          const speaker = clientPlayers[currentActScene.agentId];
+          return `${speaker ? speaker.name : currentActScene.agentId} 正在舞台中央发言`;
+        }
+        if (currentActScene.phase === 'closing') {
+          return '固定自我介绍即将结束，随后自动回到第 0 幕';
+        }
+        return '固定脚本演出中';
+      }
+      const subtitles = {
+        2: '提交组队偏好，等待系统汇总',
+        3: '准备完成 2+1 分组',
+        4: '进入团队房间，开始头脑风暴',
+        5: '同步产品文档与版本',
+        6: '必要时提出清晰的人类代言请求',
+        7: '评审中，记录反馈与得分',
+        8: '公布获奖结果与一致性',
+        9: '在共享画布上自由创作',
+        10: '闭幕交流与总结',
+      };
+      return subtitles[currentActState.act] || '当前幕次进行中';
     }
 
     // ==========================================
@@ -522,7 +592,14 @@
     // ==========================================
     function updateCamera(dt) {
       camera.zoom += (camera.targetZoom - camera.zoom) * Math.min(1, dt * 10);
-      if (isCameraFollowing && selectedPlayerId && clientPlayers[selectedPlayerId]) {
+      const stageFocusActive = currentActState.act === 1 && currentActScene && currentActScene.active && currentActScene.agentId && clientPlayers[currentActScene.agentId];
+      if (stageFocusActive) {
+        const p = clientPlayers[currentActScene.agentId];
+        const focusZoom = Number(currentActScene.focusZoom || 2.2);
+        camera.targetZoom = focusZoom;
+        camera.targetX = p.displayX + TILE_SIZE / 2 - VIEWPORT_W / (2 * camera.zoom);
+        camera.targetY = p.displayY + TILE_SIZE / 2 - VIEWPORT_H / (2 * camera.zoom);
+      } else if (isCameraFollowing && selectedPlayerId && clientPlayers[selectedPlayerId]) {
         const p = clientPlayers[selectedPlayerId];
         camera.targetX = p.displayX + TILE_SIZE / 2 - VIEWPORT_W / (2 * camera.zoom);
         camera.targetY = p.displayY + TILE_SIZE / 2 - VIEWPORT_H / (2 * camera.zoom);
@@ -772,18 +849,24 @@
       }
 
       const actorOverlays = [];
+      const stagePresentationActive = currentActState.act === 1 && currentActScene && currentActScene.active;
 
       Object.values(clientPlayers).sort((a,b)=>a.displayY-b.displayY).forEach(p=>{
         const sx=p.displayX,sy=p.displayY;
         const idle=isPlayerIdle(p);
-        const actorAlpha=idle?0.45:1;
+        const isStageFocus = stagePresentationActive && currentActScene.agentId === p.id;
+        const actorAlpha = isStageFocus ? 1 : (stagePresentationActive ? 0.14 : idle ? 0.45 : 1);
+        const focusScale = isStageFocus ? 1.55 : 1.2;
+        const shake = isStageFocus ? Math.sin(Date.now()/55) * 2.2 : 0;
+        const drawX = isStageFocus ? sx - TILE_SIZE * 0.18 : sx;
+        const drawY = isStageFocus ? sy - 16 + shake : sy - 10;
         const col={'S':0,'N':1,'W':2,'E':3}[(p.lastDirection||'S').toUpperCase()]||0;
         const row=Math.floor(p.animFrame);
         const si=(p.sprite&&characterImages[p.sprite])?characterImages[p.sprite]:images['player'];
         const pw=si.width/4,ph=si.height/4;
         ctx.save();
         ctx.globalAlpha=actorAlpha;
-        ctx.drawImage(si,col*pw,row*ph,pw,ph,sx,sy-10,TILE_SIZE*1.2,TILE_SIZE*1.2);
+        ctx.drawImage(si,col*pw,row*ph,pw,ph,drawX,drawY,TILE_SIZE*focusScale,TILE_SIZE*focusScale);
         const cx2=sx+TILE_SIZE/2;
         const floatY=Math.sin(Date.now()/300+p.x)*2;
         const nameY=sy-15;
@@ -793,6 +876,19 @@
         actorOverlays.push(() => {
           ctx.save();
           ctx.globalAlpha=actorAlpha;
+
+          if (isStageFocus) {
+            const focusW = TILE_SIZE * focusScale + 14;
+            const focusH = TILE_SIZE * focusScale + 14;
+            ctx.strokeStyle = `rgba(255,215,64,${0.62 + 0.22 * Math.sin(Date.now()/180)})`;
+            ctx.lineWidth = 3 / camera.zoom;
+            ctx.shadowColor = 'rgba(255,215,64,0.6)';
+            ctx.shadowBlur = 20 / camera.zoom;
+            ctx.beginPath();
+            ctx.roundRect(drawX - 7, drawY - 7, focusW, focusH, 10);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+          }
 
           if(selectedPlayerId&&p.id===selectedPlayerId){
             ctx.strokeStyle=`rgba(116,185,255,${0.5+0.3*Math.sin(Date.now()/300)})`;
@@ -834,12 +930,28 @@
             ctx.font='400 12px "Pixelify Sans",sans-serif'; ctx.fillStyle='#8B5E14'; ctx.textAlign='left';
             ctx.fillText(actText,tx,by+bh/2+1); ctx.textAlign='center';
           } else if(p.message){
-            const msg=p.message.length>30?p.message.substring(0,30)+'...':p.message;
-            ctx.font='400 14px "Pixelify Sans",sans-serif';
-            const bw=ctx.measureText(msg).width+32,bh=30,bx=cx2-bw/2,by=sy-65+floatY;
-            ctx.fillStyle='white'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill();
-            ctx.strokeStyle='#8ecf7e'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
-            ctx.fillStyle='#5c4a3d'; ctx.fillText(msg,cx2,by+bh/2);
+            const isAct0Conversation = currentActState.act === 0;
+            const msgMaxLength = isAct0Conversation ? 36 : 30;
+            const msg=p.message.length>msgMaxLength?p.message.substring(0,msgMaxLength)+'...':p.message;
+            ctx.font=`400 ${isAct0Conversation ? 15 : 14}px "Pixelify Sans",sans-serif`;
+            const bw=ctx.measureText(msg).width+(isAct0Conversation ? 40 : 32);
+            const bh=isAct0Conversation ? 36 : 30;
+            const bx=cx2-bw/2,by=sy-(isAct0Conversation ? 74 : 65)+floatY;
+            if (isAct0Conversation) {
+              ctx.shadowColor='rgba(116,185,255,0.24)';
+              ctx.shadowBlur=14/camera.zoom;
+              ctx.fillStyle='rgba(255,255,255,0.98)';
+              ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,12); ctx.fill();
+              ctx.shadowBlur=0;
+              ctx.strokeStyle='rgba(116,185,255,0.88)'; ctx.lineWidth=2.2/camera.zoom; ctx.stroke();
+              ctx.fillStyle='rgba(255,255,255,0.98)'; ctx.beginPath(); ctx.moveTo(cx2-5,by+bh); ctx.lineTo(cx2+5,by+bh); ctx.lineTo(cx2,by+bh+8); ctx.closePath(); ctx.fill();
+              ctx.strokeStyle='rgba(116,185,255,0.88)'; ctx.lineWidth=1.6/camera.zoom; ctx.stroke();
+              ctx.fillStyle='#3f4c6b'; ctx.fillText(msg,cx2,by+bh/2+1);
+            } else {
+              ctx.fillStyle='white'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill();
+              ctx.strokeStyle='#8ecf7e'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
+              ctx.fillStyle='#5c4a3d'; ctx.fillText(msg,cx2,by+bh/2);
+            }
           }
 
           ctx.restore();
@@ -878,6 +990,10 @@
       ctx.restore();
       ctx.imageSmoothingEnabled=true;
 
+      if (stagePresentationActive) {
+        drawActPresentation();
+      }
+
       // === 屏幕坐标层：检测玩家悬停 ===
       hoveredPlayerId=null;
       for(const id in clientPlayers){
@@ -894,6 +1010,86 @@
         const spy=(p.displayY-camera.y)*camera.zoom;
         drawPlayerHoverCard(p,spx,spy);
       }
+    }
+
+    function drawActPresentation() {
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
+
+      const speaker = currentActScene.agentId ? clientPlayers[currentActScene.agentId] : null;
+      if (speaker) {
+        const px = (speaker.displayX - camera.x) * camera.zoom + TILE_SIZE * camera.zoom / 2;
+        const py = (speaker.displayY - camera.y) * camera.zoom + TILE_SIZE * camera.zoom / 2;
+        const radius = 86 + Math.sin(Date.now() / 120) * 8;
+        const glow = ctx.createRadialGradient(px, py, 10, px, py, radius);
+        glow.addColorStop(0, 'rgba(255,255,255,0.05)');
+        glow.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+        glow.addColorStop(1, 'rgba(233,69,96,0.28)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(px, py, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const cardX = 58;
+      const cardY = 46;
+      const cardW = VIEWPORT_W - 116;
+      const cardH = 170;
+      ctx.fillStyle = 'rgba(255,255,255,0.94)';
+      ctx.strokeStyle = 'rgba(233,69,96,0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.roundRect(cardX, cardY, cardW, cardH, 22);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#e94560';
+      ctx.font = '700 18px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`第${currentActState.act}幕 · ${currentActState.name || '舞台展示'}`, cardX + 22, cardY + 34);
+
+      ctx.fillStyle = '#16213e';
+      ctx.font = '700 26px sans-serif';
+      ctx.fillText(currentActScene.title || '正在展示', cardX + 22, cardY + 76);
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '500 16px sans-serif';
+      const lines = wrapStageText(currentActScene.text || '', cardW - 44);
+      lines.slice(0, 4).forEach((line, index) => {
+        ctx.fillText(line, cardX + 22, cardY + 114 + index * 24);
+      });
+
+      if (speaker) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 16px sans-serif';
+        ctx.fillText(speaker.name || currentActScene.agentId, VIEWPORT_W / 2, VIEWPORT_H - 54);
+        ctx.fillStyle = '#64748b';
+        ctx.font = '500 13px sans-serif';
+        ctx.fillText('舞台聚焦中 · 演出结束后自动回到第 0 幕', VIEWPORT_W / 2, VIEWPORT_H - 28);
+      }
+      ctx.restore();
+    }
+
+    function wrapStageText(text, maxWidth) {
+      if (!text) return [];
+      const result = [];
+      let line = '';
+      ctx.save();
+      ctx.font = '500 16px sans-serif';
+      for (const char of text) {
+        const next = line + char;
+        if (ctx.measureText(next).width > maxWidth && line) {
+          result.push(line);
+          line = char;
+        } else {
+          line = next;
+        }
+      }
+      if (line) result.push(line);
+      ctx.restore();
+      return result;
     }
 
     // ==========================================

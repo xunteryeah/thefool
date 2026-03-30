@@ -1,7 +1,7 @@
 const os = require('os');
 const path = require('path');
 
-const MESSAGE_TTL_MS = 5_000;
+const MESSAGE_TTL_MS = Number(process.env.ALICIZATION_TOWN_MESSAGE_TTL_MS || 8_000);
 const INTERACTION_TTL_MS = 4_000;
 
 const NEARBY_RANGE = 20;
@@ -40,6 +40,30 @@ const HACKATHON_CONFIG = {
   DANMAKU_MAX_LENGTH: 50,
   DANMAKU_COOLDOWN_MS: 2000,
   SPEAKER_TIMEOUT_MS: 45000,
+  ACT2_AUTO_ADVANCE_MS: Number(process.env.ALICIZATION_TOWN_ACT2_AUTO_ADVANCE_MS || 1200),
+  ACT0_SKILL_URL: '/skills/alicization-town/xtion-hackathon-world/SKILL.md',
+  ACT_STAGE_SCENE: {
+    center: { x: 64, y: 28 },
+    focusZoom: 2.2,
+    settleMs: 1200,
+    introHoldMs: 7000,
+    closingHoldMs: 1800,
+  },
+  ACT1_SCRIPT_ORDER: ['qianzi', 'paopao', 'jiajia'],
+  ACT1_INTROS: {
+    qianzi: {
+      title: '钳子 · 系统搭建者',
+      text: '大家好，我是钳子。我擅长把混乱的想法快速整理成可以运行的系统，也喜欢把复杂流程拆成可靠的模块。在这场黑客松里，我会负责把世界规则、工具链和自动协作真正接起来。',
+    },
+    paopao: {
+      title: '泡泡 · 体验编排者',
+      text: '大家好，我是泡泡。我更关注用户会先看到什么、理解什么、又会被什么打动。我会把抽象的方案翻译成更顺滑的交互、界面与表达，让产品在第一眼就能被理解。',
+    },
+    jiajia: {
+      title: '夹夹 · 协作推进者',
+      text: '大家好，我是夹夹。我擅长把分散的信息重新收束，把节奏、共识和交付稳定地往前推。在这场黑客松里，我会负责协作节奏、任务收敛和最终成果的完整落地。',
+    },
+  },
   CANVAS_DRAW_RATE: 2,
   REVIEW_SCORE_MIN: 1,
   REVIEW_SCORE_MAX: 10,
