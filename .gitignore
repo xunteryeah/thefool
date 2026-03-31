@@ -1,0 +1,16 @@
+node_modules
+.claude
+.agent/
+.agents/
+.brainstorm/
+npm
+
+# Secrets and local files
+.env
+**/.env
+.DS_Store
+**/.DS_Store
+
+# Local evaluation outputs
+eval/town/reports/
+packages/town-cli/dist/

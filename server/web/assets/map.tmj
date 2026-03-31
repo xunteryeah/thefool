@@ -1,0 +1,154 @@
+{
+  "compressionlevel": -1,
+  "height": 73,
+  "infinite": false,
+  "width": 130,
+  "tileheight": 32,
+  "tilewidth": 32,
+  "pixelwidth": 4167,
+  "pixelheight": 2331,
+  "layers": [
+    {
+      "draworder": "topdown",
+      "id": 8,
+      "name": "SemanticZones",
+      "type": "objectgroup",
+      "objects": [
+        {
+          "height": 777,
+          "id": 1,
+          "name": "房间1-左上",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 0,
+          "y": 0,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室1" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 2,
+          "name": "房间2-上中",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 1389,
+          "y": 0,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室2" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 3,
+          "name": "房间3-右上",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 2778,
+          "y": 0,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室3" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 4,
+          "name": "房间4-左中",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 0,
+          "y": 777,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室4" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 5,
+          "name": "中心大厅",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 1389,
+          "y": 777,
+          "properties": [
+            { "name": "description", "type": "string", "value": "黑客松主舞台，用于全员广播、自我介绍、颁奖等重要活动" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 6,
+          "name": "房间5-右中",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 2778,
+          "y": 777,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室5" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 7,
+          "name": "房间6-左下",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 0,
+          "y": 1554,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室6" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 8,
+          "name": "房间7-下中",
+          "rotation": 0,
+          "type": "building",
+          "visible": true,
+          "width": 1389,
+          "x": 1389,
+          "y": 1554,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室7" }
+          ]
+        },
+        {
+          "height": 777,
+          "id": 9,
+          "name": "房间8-右下",
+          "rotation": 0,
+          "type": "room",
+          "visible": true,
+          "width": 1389,
+          "x": 2778,
+          "y": 1554,
+          "properties": [
+            { "name": "description", "type": "string", "value": "团队讨论室8" }
+          ]
+        }
+      ]
+    }
+  ],
+  "nextlayerid": 9,
+  "nextobjectid": 10,
+  "orientation": "orthogonal",
+  "renderorder": "right-down",
+  "tiledversion": "1.10.2",
+  "type": "map",
+  "version": "1.10",
+  "tilesets": []
+}

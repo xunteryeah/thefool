@@ -1,0 +1,58 @@
+{
+  "suite": "town-resident-evaluation",
+  "scenarios": [
+    {
+      "id": 1,
+      "name": "full-walkthrough-zh",
+      "brief": "你是一个充满好奇心的旅人，今天终于来到了传说中的 Alicization Town。你打算在这里度过漫长充实的一天，把所有有趣的地方都走遍。先看看地图了解这个小镇的全貌，然后环顾四周感受出发点的氛围。接下来，自由地前往你感兴趣的每一个地方——餐馆、商铺、神社、农场、温泉、码头……每到一处都仔细观察四周，尝试和环境互动，在聊天频道里说说你此刻的感受。不要着急，慢慢体验，直到你觉得这一天足够丰富。最后，像写日记一样，用你自己的话详细回忆今天的完整经历。",
+      "expected_world_state": "角色进行了深度长时间探索，走访了多个不同区域，多次 interact，多次在频道发言记录感受。timeline 丰富，轨迹覆盖广。",
+      "assessment_points": [
+        "[world_truth] timeline 中有大量状态变化记录。",
+        "[world_truth] 角色走访了多个截然不同的具名区域。",
+        "[world_truth] 服务端记录到了 interact 和聊天消息。",
+        "[format_truth] 引擎充分调用了 map, look, walk, chat, interact。",
+        "[persona_truth] 日记以第一人称详细叙事，情感真实，篇幅充沛。",
+        "[persona_truth] 日记覆盖了多个地点的互动细节，无机械步骤感。"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "perception-awareness-zh",
+      "brief": "你来到小镇后，注意观察周围正在发生的事情。先查看地图和环顾四周。然后走到人多的地方。每次行动后都检查一下你有没有注意到周围发生了什么变化——比如有人在说话、有人走过、有人加入了小镇。这些信息可能出现在你 walk 或 look 的响应里。和你遇到的人聊聊天，说说你注意到了什么。最后总结你一路上感知到的所有事件。",
+      "expected_world_state": "角色主动移动、观察，并通过 perceptions 字段感知到附近发生的事件。有过至少一句发言来回应感知到的内容。",
+      "assessment_points": [
+        "[world_truth] timeline 中至少有 4 条记录。",
+        "[world_truth] 角色有过至少一次发言。",
+        "[format_truth] 引擎调用了 walk 和 look_around。",
+        "[persona_truth] summary 提到了注意到周围发生的事情（感知内容）。",
+        "[persona_truth] summary 以第一人称叙述，无元语境泄露。"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "session-resilience-zh",
+      "brief": "测试你的登录状态恢复能力。首先正常登录并创建角色进入小镇。环顾四周确认你在镇上了。然后执行登出操作（如果有的话）。之后重新登录，使用你之前创建的角色。再次环顾四周，确认你还在小镇里。接着走几步，说一句：我回来了！描述你登出和重新登录的完整过程。",
+      "expected_world_state": "角色完成了登录→操作→登出→重新登录→操作的完整循环，最终仍然在线有动作。",
+      "assessment_points": [
+        "[world_truth] timeline 记录横跨登出前后。",
+        "[world_truth] 最终状态显示角色在线且有发言。",
+        "[format_truth] 引擎调用了 login 至少两次。",
+        "[format_truth] 引擎调用了 look_around 和 walk。",
+        "[persona_truth] summary 描述了登出和重新登录的过程。"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "social-gathering-zh",
+      "brief": "你和几位新邻居今天同时来到了 Alicization Town。到处逛逛，认识一下这个地方和你的新邻居们吧。最后聊聊你对小镇和邻居们的印象。",
+      "expected_world_state": "多个角色同时在线，彼此能通过 look 看见对方，通过 say 发言并被其他角色的 perceptions 感知到。timeline 中有多次发言记录。",
+      "assessment_points": [
+        "[world_truth] timeline 中至少有 4 条记录。",
+        "[world_truth] 角色有过至少一次发言。",
+        "[format_truth] 引擎调用了 look_around 和 walk。",
+        "[persona_truth] summary 以第一人称叙述，提到了遇到的人或周围的见闻。",
+        "[persona_truth] summary 无元语境泄露。"
+      ]
+    }
+  ]
+}

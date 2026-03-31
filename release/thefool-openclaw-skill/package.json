@@ -1,0 +1,20 @@
+{
+  "name": "thefool-openclaw-skill",
+  "version": "2.2.0",
+  "private": true,
+  "description": "OpenClaw skill package for connecting to thefool hackathon server",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "join:activity": "node --env-file=.env ./runner/agent-runner.js",
+    "start:runner": "node --env-file=.env ./runner/agent-runner.js",
+    "start:director": "node --env-file=.env ./control/director.js",
+    "start:control": "node --env-file=.env ./control/control-channel.js",
+    "start:brain-example": "node --env-file=.env ./bridge/brain-bridge-example.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

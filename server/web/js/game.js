@@ -1,0 +1,1342 @@
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const miniCanvas = document.getElementById('minimapCanvas');
+    const miniCtx = miniCanvas.getContext('2d');
+    const chatlogEl = document.getElementById('chatlog');
+    const TILE_SIZE = 32; // 匹配 MapALL.png 地图尺寸 (4167x2331)
+    const CHARACTER_BASE_RENDER_SIZE = 128;
+    const CHARACTER_RENDER_SCALE = 4;
+    const CHARACTER_RENDER_SIZE = CHARACTER_BASE_RENDER_SIZE * CHARACTER_RENDER_SCALE;
+    const CUSTOM_BACKGROUND_KEY = 'custom-background.png';
+    const STAGE_FOCUS_SCALE = 1.1;
+    const VIEWPORT_W = 800, VIEWPORT_H = 600;
+    const IDLE_AFTER_MS = 30000;
+    const OFFLINE_AFTER_MS = 180000;
+
+    let PLAYER_W = 16, PLAYER_H = 16;
+    let mapData = null;
+    let clientPlayers = {};
+    const images = {};
+    let imagesLoaded = 0;
+    let totalImagesToLoad = 1;
+    let isGameLoopRunning = false;
+    const MAP_FILE = 'thefool01.tmj';
+    const FLIPPED_HORIZONTALLY_FLAG = 0x80000000;
+    const FLIPPED_VERTICALLY_FLAG = 0x40000000;
+    const FLIPPED_DIAGONALLY_FLAG = 0x20000000;
+    const GID_MASK = ~(FLIPPED_HORIZONTALLY_FLAG | FLIPPED_VERTICALLY_FLAG | FLIPPED_DIAGONALLY_FLAG);
+
+    // === Loading screen progress ===
+    const _loadBar = document.getElementById('loading-bar');
+    const _loadText = document.getElementById('loading-text');
+    let _loadingDismissed = false;
+    function _updateLoadingProgress() {
+      if (_loadingDismissed) return;
+      const pct = Math.min(100, Math.round(imagesLoaded / totalImagesToLoad * 100));
+      if (_loadBar) _loadBar.style.width = pct + '%';
+      if (_loadText) _loadText.textContent = 'Loading ' + pct + '%';
+      if (imagesLoaded >= totalImagesToLoad && mapData) { _dismissLoading(); }
+    }
+    function _dismissLoading() {
+      if (_loadingDismissed) return;
+      _loadingDismissed = true;
+      const el = document.getElementById('loading-screen');
+      if (el) { el.classList.add('fade-out'); setTimeout(() => el.remove(), 700); }
+    }
+
+    // 同时缓存屏幕坐标和世界坐标，避免命中检测时反复换算。
+    let mouseScreenX = -1, mouseScreenY = -1;
+    let mouseX = -1, mouseY = -1;
+
+    // === 镜头状态 ===
+    let camera = { x: 0, y: 0, targetX: 0, targetY: 0, zoom: 1.0, targetZoom: 1.0 };
+    let isCameraFollowing = false;
+    let isStageAutoFocus = false;
+    function stopCameraAutoFocus() {
+      isCameraFollowing = false;
+      isStageAutoFocus = false;
+    }
+    function getMinZoom() {
+      if (!mapData) return 0.5;
+      const mapPxW = mapData.width * TILE_SIZE;
+      const mapPxH = mapData.height * TILE_SIZE;
+      return Math.max(VIEWPORT_W / mapPxW, VIEWPORT_H / mapPxH);
+    }
+
+    // 拖拽期间需要记住起点，才能让镜头跟手而不是跳变。
+    let isDragging = false, dragMoved = false;
+    let dragStartScreen = { x: 0, y: 0 };
+    let dragStartCam = { x: 0, y: 0 };
+
+    // === 玩家轨迹 ===
+    const playerTrails = {};
+    const MAX_TRAIL = 25;
+
+    // 当前悬停的玩家会驱动右侧信息卡和点击跟随。
+    let hoveredPlayerId = null;
+
+    // === 昼夜循环 ===
+    let gameTime = 6 * 60;
+    const TIME_SPEED = 0.01;
+
+    // === 粒子系统 ===
+    let particles = [];
+
+    // === 聊天流 ===
+    let chatMessages = [];
+    const MAX_DISPLAY_MESSAGES = 100;
+
+    // === AI 面板 ===
+    let selectedPlayerId = null;
+    let playerActivityData = {};
+    const aiListEl = document.getElementById('ai-list');
+    const aiCountEl = document.getElementById('ai-count');
+    const activityDetailEl = document.getElementById('activity-detail');
+    const activityDetailNameEl = document.getElementById('activity-detail-name');
+    const activityLogEl = document.getElementById('activity-log');
+    const actBannerEl = document.getElementById('act-banner');
+    const actBannerTitleEl = document.getElementById('act-banner-title');
+    const actBannerSubtitleEl = document.getElementById('act-banner-subtitle');
+    let currentActState = { act: 0, name: '普通交流状态' };
+    let currentActScene = { active: false, mode: 'free' };
+    let actBannerHighlightTimer = null;
+
+    // === 背景音乐 ===
+    const bgm = new Audio('assets/musics/36-Village.ogg');
+    bgm.loop = true; bgm.volume = 0.3;
+    let musicPlaying = false;
+    document.getElementById('music-toggle').addEventListener('click', () => {
+      musicPlaying = !musicPlaying;
+      if (musicPlaying) { bgm.play().catch(() => {}); document.getElementById('music-toggle').textContent = 'Music ON'; }
+      else { bgm.pause(); document.getElementById('music-toggle').textContent = 'Music OFF'; }
+    });
+
+    // === 角色贴图 ===
+    const CHARACTER_SPRITES = ['Custom1','Boy','Cavegirl','Eskimo','FighterRed','Monk','OldMan','Princess','Samurai','Skeleton','Vampire','Villager'];
+    const characterImages = {};
+    CHARACTER_SPRITES.forEach(name => {
+      const img = new Image();
+      img.src = `assets/characters/${name}.png`;
+      img.onload = () => { imagesLoaded++; _updateLoadingProgress(); };
+      characterImages[name] = img;
+      totalImagesToLoad++;
+    });
+    images['player'] = new Image();
+    images['player'].src = 'assets/player.png';
+    images['player'].onload = () => { imagesLoaded++; PLAYER_W = images['player'].width / 4; PLAYER_H = images['player'].height / 4; _updateLoadingProgress(); };
+    images[CUSTOM_BACKGROUND_KEY] = new Image();
+    images[CUSTOM_BACKGROUND_KEY].src = `assets/${CUSTOM_BACKGROUND_KEY}`;
+    images[CUSTOM_BACKGROUND_KEY].onload = () => { imagesLoaded++; _updateLoadingProgress(); };
+    images[CUSTOM_BACKGROUND_KEY].onerror = () => { imagesLoaded++; _updateLoadingProgress(); };
+    totalImagesToLoad++;
+
+    const emoteImages = {};
+    for (let i = 1; i <= 16; i++) { const img = new Image(); img.src = `assets/emotes/emote${i}.png`; emoteImages[i] = img; }
+
+    const ITEM_NAMES = ['Noodle','Sushi','Fish','Onigiri','Meat','FortuneCookie','Honey','LifePot','MilkPot','WaterPot','Heart','Sword','Katana','Bow','GoldCoin','GoldKey','Billboard'];
+    const itemImages = {};
+    ITEM_NAMES.forEach(name => { const img = new Image(); img.src = `assets/items/${name}.png`; itemImages[name] = img; });
+
+    const sfx = {
+      interact: new Audio('assets/sounds/interact.wav'),
+      chat: new Audio('assets/sounds/chat.wav'),
+      magic: new Audio('assets/sounds/magic.wav'),
+      heal: new Audio('assets/sounds/heal.wav'),
+    };
+    Object.values(sfx).forEach(s => { s.volume = 0.25; });
+    let sfxEnabled = true;
+    document.getElementById('sfx-toggle').addEventListener('click', () => {
+      sfxEnabled = !sfxEnabled;
+      document.getElementById('sfx-toggle').textContent = sfxEnabled ? 'SFX ON' : 'SFX OFF';
+    });
+
+    const particleSprites = {};
+    ['Leaf','LeafPink','Spark'].forEach(name => { const img = new Image(); img.src = `assets/particles/${name}.png`; particleSprites[name] = img; });
+
+    // ==========================================
+    // === 鼠标与镜头事件 ===
+    // ==========================================
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+      mouseScreenX = (e.clientX - rect.left) * scaleX;
+      mouseScreenY = (e.clientY - rect.top) * scaleY;
+      mouseX = mouseScreenX / camera.zoom + camera.x;
+      mouseY = mouseScreenY / camera.zoom + camera.y;
+      if (isDragging) {
+        dragMoved = true;
+        const dx = (mouseScreenX - dragStartScreen.x) / camera.zoom;
+        const dy = (mouseScreenY - dragStartScreen.y) / camera.zoom;
+        let newX = dragStartCam.x - dx;
+        let newY = dragStartCam.y - dy;
+        if (mapData) {
+          const maxX = Math.max(0, mapData.width * TILE_SIZE - VIEWPORT_W / camera.zoom);
+          const maxY = Math.max(0, mapData.height * TILE_SIZE - VIEWPORT_H / camera.zoom);
+          newX = Math.max(0, Math.min(newX, maxX));
+          newY = Math.max(0, Math.min(newY, maxY));
+        }
+        camera.x = camera.targetX = newX;
+        camera.y = camera.targetY = newY;
+      }
+    });
+    canvas.addEventListener('mouseleave', () => { mouseScreenX = -1; mouseScreenY = -1; mouseX = -1; mouseY = -1; });
+
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      stopCameraAutoFocus();
+      isDragging = true; dragMoved = false;
+      dragStartScreen = { x: mouseScreenX, y: mouseScreenY };
+      dragStartCam = { x: camera.x, y: camera.y };
+      canvas.classList.add('dragging');
+    });
+    canvas.addEventListener('mouseup', (e) => {
+      if (e.button !== 0) return;
+      canvas.classList.remove('dragging');
+      if (!dragMoved) {
+        if (hoveredPlayerId && clientPlayers[hoveredPlayerId]) {
+          selectAndFollowPlayer(hoveredPlayerId);
+        } else {
+          isCameraFollowing = false;
+        }
+      } else {
+        isCameraFollowing = false;
+      }
+      isDragging = false;
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      stopCameraAutoFocus();
+      const delta = e.deltaY > 0 ? -0.25 : 0.25;
+      camera.targetZoom = Math.max(getMinZoom(), Math.min(4.0, camera.targetZoom + delta));
+      if (mouseScreenX >= 0) {
+        const nz = camera.targetZoom;
+        let newX = mouseX - mouseScreenX / nz;
+        let newY = mouseY - mouseScreenY / nz;
+        if (mapData) {
+          const maxX = Math.max(0, mapData.width * TILE_SIZE - VIEWPORT_W / nz);
+          const maxY = Math.max(0, mapData.height * TILE_SIZE - VIEWPORT_H / nz);
+          newX = Math.max(0, Math.min(newX, maxX));
+          newY = Math.max(0, Math.min(newY, maxY));
+        }
+        camera.x = camera.targetX = newX;
+        camera.y = camera.targetY = newY;
+      }
+      isCameraFollowing = false;
+    }, { passive: false });
+
+    // === Touch events for mobile drag ===
+    let touchId = null;
+    let pinchStartDist = 0, pinchStartZoom = 1;
+
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      stopCameraAutoFocus();
+      if (e.touches.length === 2) {
+        // Pinch zoom start
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchStartDist = Math.hypot(dx, dy);
+        pinchStartZoom = camera.targetZoom;
+        isDragging = false;
+        touchId = null;
+        return;
+      }
+      if (e.touches.length === 1 && touchId === null) {
+        const t = e.touches[0];
+        touchId = t.identifier;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+        mouseScreenX = (t.clientX - rect.left) * scaleX;
+        mouseScreenY = (t.clientY - rect.top) * scaleY;
+        mouseX = mouseScreenX / camera.zoom + camera.x;
+        mouseY = mouseScreenY / camera.zoom + camera.y;
+        isDragging = true; dragMoved = false;
+        dragStartScreen = { x: mouseScreenX, y: mouseScreenY };
+        dragStartCam = { x: camera.x, y: camera.y };
+        canvas.classList.add('dragging');
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      stopCameraAutoFocus();
+      if (e.touches.length === 2) {
+        // Pinch zoom
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const scale = dist / pinchStartDist;
+        camera.targetZoom = Math.max(getMinZoom(), Math.min(4.0, pinchStartZoom * scale));
+        isCameraFollowing = false;
+        return;
+      }
+      const t = Array.from(e.touches).find(tt => tt.identifier === touchId);
+      if (!t || !isDragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+      mouseScreenX = (t.clientX - rect.left) * scaleX;
+      mouseScreenY = (t.clientY - rect.top) * scaleY;
+      mouseX = mouseScreenX / camera.zoom + camera.x;
+      mouseY = mouseScreenY / camera.zoom + camera.y;
+      dragMoved = true;
+      const ddx = (mouseScreenX - dragStartScreen.x) / camera.zoom;
+      const ddy = (mouseScreenY - dragStartScreen.y) / camera.zoom;
+      let newX = dragStartCam.x - ddx;
+      let newY = dragStartCam.y - ddy;
+      if (mapData) {
+        const maxX = Math.max(0, mapData.width * TILE_SIZE - VIEWPORT_W / camera.zoom);
+        const maxY = Math.max(0, mapData.height * TILE_SIZE - VIEWPORT_H / camera.zoom);
+        newX = Math.max(0, Math.min(newX, maxX));
+        newY = Math.max(0, Math.min(newY, maxY));
+      }
+      camera.x = camera.targetX = newX;
+      camera.y = camera.targetY = newY;
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e) => {
+      if (e.touches.length === 0) {
+        canvas.classList.remove('dragging');
+        if (!dragMoved && hoveredPlayerId && clientPlayers[hoveredPlayerId]) {
+          selectAndFollowPlayer(hoveredPlayerId);
+        } else if (dragMoved) {
+          isCameraFollowing = false;
+        }
+        isDragging = false;
+        touchId = null;
+      } else if (e.touches.length === 1) {
+        // Switched from pinch to single finger — restart drag
+        const t = e.touches[0];
+        touchId = t.identifier;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width, scaleY = canvas.height / rect.height;
+        mouseScreenX = (t.clientX - rect.left) * scaleX;
+        mouseScreenY = (t.clientY - rect.top) * scaleY;
+        dragStartScreen = { x: mouseScreenX, y: mouseScreenY };
+        dragStartCam = { x: camera.x, y: camera.y };
+        isDragging = true; dragMoved = false;
+      }
+    });
+
+    canvas.addEventListener('touchcancel', () => {
+      isDragging = false; touchId = null;
+      canvas.classList.remove('dragging');
+    });
+
+    // === Zoom button controls ===
+    const DEFAULT_ZOOM = 1.0;
+
+    function applyZoom(newZoom) {
+      stopCameraAutoFocus();
+      camera.targetZoom = Math.max(getMinZoom(), Math.min(4.0, newZoom));
+      isCameraFollowing = false;
+    }
+
+    document.getElementById('zoom-in-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyZoom(camera.targetZoom + 0.5);
+    });
+    document.getElementById('zoom-out-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyZoom(camera.targetZoom - 0.5);
+    });
+    document.getElementById('zoom-reset-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyZoom(DEFAULT_ZOOM);
+    });
+
+    miniCanvas.addEventListener('click', (e) => {
+      if (!mapData) return;
+      stopCameraAutoFocus();
+      const rect = miniCanvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left) * (miniCanvas.width / rect.width);
+      const my = (e.clientY - rect.top) * (miniCanvas.height / rect.height);
+      const mapPixelW = mapData.width * TILE_SIZE, mapPixelH = mapData.height * TILE_SIZE;
+      const scale = Math.min(miniCanvas.width / mapPixelW, miniCanvas.height / mapPixelH);
+      camera.targetX = mx / scale - VIEWPORT_W / (2 * camera.zoom);
+      camera.targetY = my / scale - VIEWPORT_H / (2 * camera.zoom);
+      isCameraFollowing = false;
+    });
+
+    function selectAndFollowPlayer(id) {
+      selectedPlayerId = id;
+      isStageAutoFocus = false;
+      isCameraFollowing = true;
+      selectedFlashTime = Date.now();
+      activityDetailEl.classList.add('visible');
+      const p = clientPlayers[id];
+      if (p) { activityDetailNameEl.textContent = p.name; renderActivityLog(id); }
+      updateAiPanel();
+    }
+
+    function isPlayerOffline(player) {
+      return !player.lastHeartbeatAt || (Date.now() - player.lastHeartbeatAt) > OFFLINE_AFTER_MS;
+    }
+
+    function isPlayerIdle(player) {
+      if (isPlayerOffline(player)) return false;
+      return !player.lastActionAt || (Date.now() - player.lastActionAt) > IDLE_AFTER_MS;
+    }
+
+    function normalizeTilesetImagePath(imagePath) {
+      return (imagePath || '').replace(/\\/g, '/').replace(/^\.?\//, '').replace(/^assets\//, '');
+    }
+
+    function getTilesetImageKey(tileset) {
+      return normalizeTilesetImagePath(tileset?.image);
+    }
+
+    function loadTilesetImages() {
+      const seen = new Set();
+      (mapData.tilesets || []).forEach((tileset) => {
+        const imageKey = getTilesetImageKey(tileset);
+        if (!imageKey || seen.has(imageKey) || images[imageKey]) return;
+        seen.add(imageKey);
+        const img = new Image();
+        img.src = `assets/${imageKey}`;
+        img.onload = () => { imagesLoaded++; _updateLoadingProgress(); };
+        img.onerror = () => { imagesLoaded++; _updateLoadingProgress(); };
+        images[imageKey] = img;
+        totalImagesToLoad++;
+      });
+    }
+
+    function decodeGidBuffer(buffer) {
+      const view = new DataView(buffer);
+      const gids = [];
+      for (let offset = 0; offset < view.byteLength; offset += 4) gids.push(view.getUint32(offset, true));
+      return gids;
+    }
+
+    async function decodeTileLayerData(layer) {
+      if (Array.isArray(layer.data)) return layer.data;
+      if (layer.encoding !== 'base64') throw new Error(`Unsupported layer encoding: ${layer.encoding || 'unknown'}`);
+      const binary = Uint8Array.from(atob(layer.data), (char) => char.charCodeAt(0));
+      if (!layer.compression) return decodeGidBuffer(binary.buffer);
+      if (layer.compression !== 'zlib') throw new Error(`Unsupported layer compression: ${layer.compression}`);
+      if (typeof DecompressionStream === 'undefined') throw new Error('Browser does not support zlib decompression');
+      const stream = new Blob([binary]).stream().pipeThrough(new DecompressionStream('deflate'));
+      const buffer = await new Response(stream).arrayBuffer();
+      return decodeGidBuffer(buffer);
+    }
+
+    async function normalizeMapData(rawMapData) {
+      const layers = await Promise.all((rawMapData.layers || []).map(async (layer) => (
+        layer.type === 'tilelayer' ? { ...layer, data: await decodeTileLayerData(layer) } : layer
+      )));
+      return { ...rawMapData, layers };
+    }
+
+    function getVisibleTileLayers() {
+      if (!mapData) return [];
+      return mapData.layers.filter(layer => layer.type === 'tilelayer' && layer.visible);
+    }
+
+    function drawTileLayer(layer) {
+      if (!layer) return;
+      for (let i = 0; i < layer.data.length; i++) drawTile(layer.data[i], i % mapData.width, Math.floor(i / mapData.width));
+    }
+
+    function hasLegacyLayering() {
+      return getVisibleTileLayers().some(layer => ['BaseFloor','Floor','BaseNature','Nature','Building','BuildingTop'].includes(layer.name));
+    }
+
+    // ==========================================
+    // === 初始化 ===
+    // ==========================================
+    async function initialize() {
+      try {
+        const response = await fetch(`assets/${MAP_FILE}`);
+        mapData = await normalizeMapData(await response.json());
+        loadTilesetImages();
+        // 观察端固定视口尺寸，避免布局变化打乱像素比例。
+        canvas.width = VIEWPORT_W; canvas.height = VIEWPORT_H;
+        // 初始镜头居中，首屏不会贴在地图边缘。
+        const mapPixelW = mapData.width * TILE_SIZE, mapPixelH = mapData.height * TILE_SIZE;
+        camera.x = camera.targetX = mapPixelW / 2 - VIEWPORT_W / (2 * camera.zoom);
+        camera.y = camera.targetY = mapPixelH / 2 - VIEWPORT_H / (2 * camera.zoom);
+
+        const eventSource = new EventSource('/events');
+        eventSource.onopen = () => { document.getElementById('status-text').innerText = "Connected - Let your OpenClaw or ClaudeCode Join the World!"; };
+        eventSource.onmessage = (event) => {
+          const serverPlayers = JSON.parse(event.data);
+          for (const id in serverPlayers) {
+            const sp = serverPlayers[id];
+            if (!clientPlayers[id]) {
+              clientPlayers[id] = { ...sp, displayX: sp.x * TILE_SIZE, displayY: sp.y * TILE_SIZE, targetX: sp.x * TILE_SIZE, targetY: sp.y * TILE_SIZE, animFrame: 0, id };
+            } else {
+              clientPlayers[id].targetX = sp.x * TILE_SIZE;
+              clientPlayers[id].targetY = sp.y * TILE_SIZE;
+              clientPlayers[id].lastDirection = sp.lastDirection;
+              clientPlayers[id].message = sp.message;
+              clientPlayers[id].interactionText = sp.interactionText;
+              clientPlayers[id].interactionIcon = sp.interactionIcon;
+              clientPlayers[id].sprite = sp.sprite;
+              clientPlayers[id].name = sp.name;
+              clientPlayers[id].id = id;
+              clientPlayers[id].isThinking = sp.isThinking;
+              clientPlayers[id].currentZoneName = sp.currentZoneName;
+              clientPlayers[id].lastActionAt = sp.lastActionAt;
+              clientPlayers[id].lastHeartbeatAt = sp.lastHeartbeatAt;
+              if (sp.interactionSound && !clientPlayers[id]._lastSound) {
+                clientPlayers[id]._lastSound = sp.interactionSound;
+                if (sfxEnabled && sfx[sp.interactionSound]) sfx[sp.interactionSound].cloneNode().play().catch(() => {});
+              }
+              if (!sp.interactionSound) clientPlayers[id]._lastSound = null;
+            }
+            clientPlayers[id].lastActionAt = sp.lastActionAt;
+            clientPlayers[id].lastHeartbeatAt = sp.lastHeartbeatAt;
+            // 只有真实位置变化才记录轨迹，避免静止时堆出重复点。
+            if (!playerTrails[id]) playerTrails[id] = [];
+            const trail = playerTrails[id];
+            const wx = sp.x * TILE_SIZE + TILE_SIZE / 2, wy = sp.y * TILE_SIZE + TILE_SIZE / 2;
+            const last = trail[trail.length - 1];
+            if (!last || last.wx !== wx || last.wy !== wy) {
+              trail.push({ wx, wy, time: Date.now() });
+              if (trail.length > MAX_TRAIL) trail.shift();
+            }
+          }
+          for (const id in clientPlayers) {
+            if (!serverPlayers[id]) { delete clientPlayers[id]; delete playerActivityData[id]; delete playerTrails[id]; }
+          }
+          updateAiPanel();
+        };
+        eventSource.addEventListener('chatHistory', (e) => { JSON.parse(e.data).forEach(entry => addChatMessage(entry)); });
+        eventSource.addEventListener('chat', (e) => { const entry = JSON.parse(e.data); addChatMessage(entry); if (sfxEnabled) sfx.chat.cloneNode().play().catch(() => {}); });
+        eventSource.addEventListener('interaction', (e) => { addInteractionMessage(JSON.parse(e.data)); });
+        eventSource.addEventListener('act:changed', (e) => {
+          currentActState = JSON.parse(e.data) || { act: 0, name: '普通交流状态' };
+          if (currentActState.act !== 1) {
+            currentActScene = { active: false, mode: 'free' };
+            isStageAutoFocus = false;
+          }
+          refreshActBanner(true);
+        });
+        eventSource.addEventListener('act:scene', (e) => {
+          currentActScene = JSON.parse(e.data) || { active: false, mode: 'free' };
+          if (currentActScene.active && currentActScene.agentId) {
+            selectedPlayerId = currentActScene.agentId;
+            isStageAutoFocus = true;
+            isCameraFollowing = false;
+          } else {
+            isStageAutoFocus = false;
+          }
+          refreshActBanner(false);
+        });
+        eventSource.addEventListener('act:speakerNext', (e) => {
+          const data = JSON.parse(e.data);
+          if (data && data.currentSpeaker) {
+            selectedPlayerId = data.currentSpeaker;
+          }
+        });
+        eventSource.addEventListener('activity', (e) => {
+          const data = JSON.parse(e.data);
+          playerActivityData[data.id] = data.activities || [];
+          if (selectedPlayerId === data.id) renderActivityLog(data.id);
+        });
+        eventSource.onerror = () => { document.getElementById('status-text').innerText = "Disconnected - Reconnecting..."; };
+
+        initParticles();
+        if (!isGameLoopRunning) { isGameLoopRunning = true; lastFrameTime = performance.now(); requestAnimationFrame(gameLoop); }
+      } catch (error) {
+        document.getElementById('status-text').innerText = "Failed to load map!";
+        console.error("Load error:", error);
+      }
+    }
+
+    function refreshActBanner(shouldPulse) {
+      if (!actBannerTitleEl || !actBannerSubtitleEl) return;
+      const actName = currentActState.name || `Act ${currentActState.act}`;
+      actBannerTitleEl.textContent = `第${currentActState.act}幕 · ${actName}`;
+      actBannerSubtitleEl.textContent = buildActSubtitle();
+      if (actBannerEl && shouldPulse) {
+        actBannerEl.classList.remove('is-highlight');
+        void actBannerEl.offsetWidth;
+        actBannerEl.classList.add('is-highlight');
+        clearTimeout(actBannerHighlightTimer);
+        actBannerHighlightTimer = setTimeout(() => {
+          actBannerEl.classList.remove('is-highlight');
+        }, 1400);
+      }
+    }
+
+    function buildActSubtitle() {
+      if (currentActState.act === 0) {
+        return '自由移动、自由广播、普通交流对话';
+      }
+      if (currentActState.act === 1 && currentActScene && currentActScene.active) {
+        if (currentActScene.phase === 'focus' && currentActScene.agentId) {
+          const speaker = clientPlayers[currentActScene.agentId];
+          return `${speaker ? speaker.name : currentActScene.agentId} 正在舞台中央发言`;
+        }
+        if (currentActScene.phase === 'closing') {
+          return '固定自我介绍即将结束，随后自动回到第 0 幕';
+        }
+        return '固定脚本演出中';
+      }
+      const subtitles = {
+        2: '提交组队偏好，等待系统汇总',
+        3: '准备完成 2+1 分组',
+        4: '进入团队房间，开始头脑风暴',
+        5: '同步产品文档与版本',
+        6: '必要时提出清晰的人类代言请求',
+        7: '评审中，记录反馈与得分',
+        8: '公布获奖结果与一致性',
+        9: '在共享画布上自由创作',
+        10: '闭幕交流与总结',
+      };
+      return subtitles[currentActState.act] || '当前幕次进行中';
+    }
+
+    // ==========================================
+    // === 主循环 ===
+    // ==========================================
+    let lastFrameTime = 0;
+    function gameLoop(timestamp) {
+      const dt = (timestamp - lastFrameTime) / 1000;
+      lastFrameTime = timestamp;
+      if (mapData && imagesLoaded >= totalImagesToLoad) {
+        _dismissLoading();
+        updateDayNight(dt);
+        updateParticles(dt);
+        updatePhysics();
+        updateCamera(dt);
+        draw();
+        drawMinimap();
+      }
+      requestAnimationFrame(gameLoop);
+    }
+
+    // Re-render AI panel on resize (orientation change, etc.)
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { updateAiPanel(); }, 150);
+    });
+
+    // ==========================================
+    // === 更新镜头 ===
+    // ==========================================
+    function updateCamera(dt) {
+      camera.zoom += (camera.targetZoom - camera.zoom) * Math.min(1, dt * 10);
+      const stageFocusActive = isStageAutoFocus && currentActState.act === 1 && currentActScene && currentActScene.active && currentActScene.agentId && clientPlayers[currentActScene.agentId];
+      if (stageFocusActive) {
+        const p = clientPlayers[currentActScene.agentId];
+        const focusZoom = Number(currentActScene.focusZoom || 2.2);
+        camera.targetZoom = focusZoom;
+        camera.targetX = p.displayX + TILE_SIZE / 2 - VIEWPORT_W / (2 * camera.zoom);
+        camera.targetY = p.displayY + TILE_SIZE / 2 - VIEWPORT_H / (2 * camera.zoom);
+      } else if (isCameraFollowing && selectedPlayerId && clientPlayers[selectedPlayerId]) {
+        const p = clientPlayers[selectedPlayerId];
+        camera.targetX = p.displayX + TILE_SIZE / 2 - VIEWPORT_W / (2 * camera.zoom);
+        camera.targetY = p.displayY + TILE_SIZE / 2 - VIEWPORT_H / (2 * camera.zoom);
+      }
+      if (mapData) {
+        const maxX = Math.max(0, mapData.width * TILE_SIZE - VIEWPORT_W / camera.zoom);
+        const maxY = Math.max(0, mapData.height * TILE_SIZE - VIEWPORT_H / camera.zoom);
+        camera.targetX = Math.max(0, Math.min(camera.targetX, maxX));
+        camera.targetY = Math.max(0, Math.min(camera.targetY, maxY));
+        camera.x = Math.max(0, Math.min(camera.x, maxX));
+        camera.y = Math.max(0, Math.min(camera.y, maxY));
+      }
+      if (!isDragging) {
+        camera.x += (camera.targetX - camera.x) * Math.min(1, dt * 8);
+        camera.y += (camera.targetY - camera.y) * Math.min(1, dt * 8);
+      }
+    }
+
+    // ==========================================
+    // === 更新插值动画 ===
+    // ==========================================
+    function updatePhysics() {
+      const MOVE_SPEED = 1.2, ANIM_SPEED = 0.09;
+      for (const id in clientPlayers) {
+        const p = clientPlayers[id];
+        let isMoving = false;
+        if (p.displayX < p.targetX) { p.displayX = Math.min(p.displayX + MOVE_SPEED, p.targetX); isMoving = true; }
+        else if (p.displayX > p.targetX) { p.displayX = Math.max(p.displayX - MOVE_SPEED, p.targetX); isMoving = true; }
+        if (p.displayY < p.targetY) { p.displayY = Math.min(p.displayY + MOVE_SPEED, p.targetY); isMoving = true; }
+        else if (p.displayY > p.targetY) { p.displayY = Math.max(p.displayY - MOVE_SPEED, p.targetY); isMoving = true; }
+        if (isMoving) { p.animFrame += ANIM_SPEED; if (p.animFrame >= 4) p.animFrame = 0; }
+        else { p.animFrame = 0; }
+      }
+    }
+
+    // ==========================================
+    // === 昼夜更新 ===
+    // ==========================================
+    function updateDayNight(dt) {
+      gameTime += TIME_SPEED * dt * 60;
+      if (gameTime >= 1440) gameTime -= 1440;
+      const hours = Math.floor(gameTime / 60), mins = Math.floor(gameTime % 60);
+      document.getElementById('time-display').textContent = `${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}`;
+    }
+    function getDayNightOverlay() {
+      const h = gameTime / 60;
+      if (h >= 6 && h < 8)  return { r:255,g:180,b:100, a: 0.15 * (1-(h-6)/2) };
+      if (h >= 8 && h < 17) return { r:0,g:0,b:0, a:0 };
+      if (h >= 17 && h < 19) return { r:255,g:140,b:50, a: 0.12 * (h-17)/2 };
+      if (h >= 19 && h < 21) return { r:20,g:20,b:80, a: 0.12 + 0.25*(h-19)/2 };
+      if (h >= 21 || h < 4)  return { r:10,g:10,b:50, a:0.4 };
+      return { r:30,g:20,b:80, a: 0.4*(1-(h-4)/2) };
+    }
+    function isNight() { return gameTime >= 1260 || gameTime < 300; }
+
+    // ==========================================
+    // === 粒子系统 ===
+    // ==========================================
+    function initParticles() { particles = []; }
+    function spawnFirefly() {
+      if (!mapData) return;
+      particles.push({ type:'firefly', x:Math.random()*mapData.width*TILE_SIZE, y:Math.random()*mapData.height*TILE_SIZE,
+        vx:(Math.random()-0.5)*15, vy:(Math.random()-0.5)*10, life:4+Math.random()*6, maxLife:10,
+        phase:Math.random()*Math.PI*2, size:1.5+Math.random()*1.5 });
+    }
+    function spawnLeaf(zx,zy,zw,zh) {
+      const sx=TILE_SIZE/mapData.tilewidth, sy=TILE_SIZE/mapData.tileheight;
+      particles.push({ type:'leaf', x:zx*sx+Math.random()*zw*sx, y:zy*sy-10, vx:8+Math.random()*12, vy:15+Math.random()*10,
+        life:3+Math.random()*2, maxLife:5, rot:Math.random()*Math.PI*2, rotSpeed:(Math.random()-0.5)*4, size:2+Math.random()*2 });
+    }
+    function spawnWaterShimmer(zx,zy,zw,zh) {
+      const sx=TILE_SIZE/mapData.tilewidth, sy=TILE_SIZE/mapData.tileheight;
+      particles.push({ type:'shimmer', x:zx*sx+Math.random()*Math.max(zw*sx,20), y:zy*sy+Math.random()*Math.max(zh*sy,20),
+        life:0.8+Math.random()*1.2, maxLife:2, size:1+Math.random()*2 });
+    }
+    let particleTimer = 0;
+    function updateParticles(dt) {
+      particleTimer += dt;
+      if (isNight() && particleTimer > 0.3) {
+        particleTimer = 0;
+        if (particles.filter(p=>p.type==='firefly').length < 25) spawnFirefly();
+      }
+      if (mapData && Math.random() < dt * 0.5) {
+        const zl = mapData.layers.find(l=>l.type==='objectgroup');
+        if (zl && zl.objects) zl.objects.forEach(z => {
+          const n=(z.name||'').toLowerCase();
+          if (n.includes('tree') && Math.random()<0.05) spawnLeaf(z.x,z.y,z.width||30,z.height||30);
+          if (n.includes('pond') && Math.random()<0.08) spawnWaterShimmer(z.x,z.y,z.width||20,z.height||30);
+        });
+      }
+      for (let i=particles.length-1;i>=0;i--) {
+        const p=particles[i]; p.life-=dt;
+        if (p.life<=0){particles.splice(i,1);continue;}
+        if (p.type==='firefly'){p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx+=(Math.random()-0.5)*20*dt;p.vy+=(Math.random()-0.5)*15*dt;p.vx=Math.max(-20,Math.min(20,p.vx));p.vy=Math.max(-15,Math.min(15,p.vy));}
+        else if (p.type==='leaf'){p.x+=p.vx*dt;p.y+=p.vy*dt;p.rot+=p.rotSpeed*dt;}
+      }
+    }
+
+    // ==========================================
+    // === 静态地标（告示牌等）===
+    // ==========================================
+    function drawStaticLandmarks(){
+      if(!mapData) return;
+      const zl=mapData.layers.find(l=>l.type==='objectgroup');
+      if(!zl||!zl.objects) return;
+      const sx=TILE_SIZE/mapData.tilewidth, sy=TILE_SIZE/mapData.tileheight;
+      zl.objects.forEach(z=>{
+        if(z.type!=='landmark') return;
+        const img=itemImages['Billboard'];
+        if(!img||!img.complete) return;
+        const px=z.x*sx, py=z.y*sy;
+        ctx.imageSmoothingEnabled=false;
+        ctx.drawImage(img, px-4, py-8, TILE_SIZE*1.4, TILE_SIZE*1.4);
+        ctx.imageSmoothingEnabled=true;
+      });
+    }
+
+    // ==========================================
+    // === 绘制瓦片 ===
+    // ==========================================
+    function drawTile(gid,x,y){
+      if(gid===0) return;
+      const flipH = (gid & FLIPPED_HORIZONTALLY_FLAG) !== 0;
+      const flipV = (gid & FLIPPED_VERTICALLY_FLAG) !== 0;
+      const flipD = (gid & FLIPPED_DIAGONALLY_FLAG) !== 0;
+      const cleanGid = gid & GID_MASK;
+      if(cleanGid===0) return;
+      const ts=mapData.tilesets.slice().reverse().find(t=>cleanGid>=t.firstgid);
+      if(!ts) return;
+      const imageKey=getTilesetImageKey(ts);
+      if(!images[imageKey]) return;
+      const localId=cleanGid-ts.firstgid,cols=ts.columns;
+      const sx=(localId%cols)*ts.tilewidth;
+      const sy=Math.floor(localId/cols)*ts.tileheight;
+      const dx=x*TILE_SIZE;
+      const dy=y*TILE_SIZE;
+      ctx.save();
+      ctx.translate(dx + TILE_SIZE / 2, dy + TILE_SIZE / 2);
+      if (flipD) {
+        ctx.rotate(-Math.PI / 2);
+        ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      } else {
+        ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+      }
+      ctx.drawImage(images[imageKey], sx, sy, ts.tilewidth, ts.tileheight, -TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE);
+      ctx.restore();
+    }
+
+    // ==========================================
+    // === 绘制玩家轨迹 ===
+    // ==========================================
+    function drawPlayerTrails(){
+      const now=Date.now();
+      for(const id in playerTrails){
+        if(!clientPlayers[id]||clientPlayers[id].name==='Observer') continue;
+        const trail=playerTrails[id];
+        if(trail.length<2) continue;
+        for(let i=1;i<trail.length;i++){
+          const ageRatio=i/trail.length;
+          const timeFade=Math.max(0,1-(now-trail[i].time)/8000);
+          const alpha=ageRatio*timeFade*0.55;
+          if(alpha<0.01) continue;
+          ctx.beginPath();
+          ctx.moveTo(trail[i-1].wx,trail[i-1].wy);
+          ctx.lineTo(trail[i].wx,trail[i].wy);
+          ctx.strokeStyle=`rgba(116,185,255,${alpha})`;
+          ctx.lineWidth=Math.max(0.5,2/camera.zoom);
+          ctx.lineCap='round';
+          ctx.stroke();
+        }
+      }
+    }
+
+    // ==========================================
+    // === 绘制玩家悬浮信息卡：屏幕坐标层 ===
+    // ==========================================
+    function drawPlayerHoverCard(p, sx, sy){
+      const W=220,H=104;
+      let cx=sx+18, cy=sy-H-12;
+      if(cx+W>VIEWPORT_W) cx=sx-W-12;
+      if(cy<0) cy=sy+28;
+      ctx.fillStyle='rgba(20,20,40,0.95)';
+      ctx.beginPath(); ctx.roundRect(cx,cy,W,H,10); ctx.fill();
+      ctx.strokeStyle='#74b9ff'; ctx.lineWidth=1.5; ctx.stroke();
+      const si=(p.sprite&&characterImages[p.sprite])?characterImages[p.sprite]:images['player'];
+      if(si&&si.complete){const pw=si.width/4,ph=si.height/4;ctx.imageSmoothingEnabled=false;ctx.drawImage(si,0,0,pw,ph,cx+8,cy+8,48,48);ctx.imageSmoothingEnabled=true;}
+      ctx.font='bold 13px "Pixelify Sans",sans-serif';
+      ctx.fillStyle='#74b9ff'; ctx.textAlign='left'; ctx.textBaseline='top';
+      ctx.fillText(p.name,cx+64,cy+10);
+      const zone=(p.currentZoneName||'小镇街道').split('(')[0].trim();
+      ctx.font='11px "Pixelify Sans",sans-serif'; ctx.fillStyle='#9aa899';
+      ctx.fillText('角色: '+(p.sprite||'默认'),cx+64,cy+28);
+      ctx.fillText('📍 '+zone,cx+64,cy+44);
+      const idle = isPlayerIdle(p);
+      ctx.fillStyle=p.isThinking?'#fdcb6e':(idle?'#95a5a6':'#00b894');
+      ctx.fillText(p.isThinking?'💭 Thinking...':(idle?'🌫 Inactive':'🟢 Active'),cx+64,cy+60);
+      if(p.message){const msg=p.message.length>22?p.message.substring(0,22)+'…':p.message;ctx.fillStyle='#dfe6e9';ctx.fillText('💬 '+msg,cx+8,cy+82);}
+      ctx.font='10px "Pixelify Sans",sans-serif'; ctx.fillStyle='rgba(116,185,255,0.5)';
+      ctx.textAlign='right'; ctx.fillText('点击跟随',cx+W-6,cy+H-8);
+      ctx.textAlign='left'; ctx.textBaseline='middle';
+    }
+
+    // ==========================================
+    // === 主渲染阶段 ===
+    // ==========================================
+    function draw(){
+      ctx.clearRect(0,0,VIEWPORT_W,VIEWPORT_H);
+      
+      ctx.save();
+      ctx.imageSmoothingEnabled=false;
+      ctx.setTransform(camera.zoom,0,0,camera.zoom,-camera.x*camera.zoom,-camera.y*camera.zoom);
+
+      const backgroundImage = images[CUSTOM_BACKGROUND_KEY];
+      if (backgroundImage && backgroundImage.complete && mapData) {
+        ctx.drawImage(backgroundImage, 0, 0, mapData.width * TILE_SIZE, mapData.height * TILE_SIZE);
+      }
+
+      if(hasLegacyLayering()){
+        ['BaseFloor','Floor','BaseNature'].forEach(name=>{
+          const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
+          drawTileLayer(l);
+        });
+      } else {
+        getVisibleTileLayers().forEach(drawTileLayer);
+      }
+
+      drawParticlesOfType('shimmer');
+      drawStaticLandmarks();
+      drawPlayerTrails();
+
+      if(selectedPlayerId&&clientPlayers[selectedPlayerId]){
+        const sp=clientPlayers[selectedPlayerId];
+        const zl=mapData.layers.find(l=>l.type==='objectgroup');
+        if(zl){
+          const zone=zl.objects.find(z=>z.name===sp.currentZoneName);
+          if(zone){
+            const sx2=TILE_SIZE/mapData.tilewidth,sy2=TILE_SIZE/mapData.tileheight;
+            const pulse=0.5+0.5*Math.sin(Date.now()/400);
+            ctx.save();
+            ctx.strokeStyle=`rgba(116,185,255,${0.3+0.35*pulse})`;
+            ctx.lineWidth=Math.max(1,3/camera.zoom);
+            ctx.shadowColor='#74b9ff'; ctx.shadowBlur=12/camera.zoom;
+            ctx.beginPath(); ctx.roundRect(zone.x*sx2,zone.y*sy2,zone.width*sx2,zone.height*sy2,4); ctx.stroke();
+            ctx.shadowBlur=0; ctx.restore();
+          }
+        }
+      }
+
+      const actorOverlays = [];
+      const stagePresentationActive = isStageAutoFocus && currentActState.act === 1 && currentActScene && currentActScene.active;
+
+      Object.values(clientPlayers).sort((a,b)=>a.displayY-b.displayY).forEach(p=>{
+        const sx=p.displayX,sy=p.displayY;
+        const idle=isPlayerIdle(p);
+        const isStageFocus = stagePresentationActive && currentActScene.agentId === p.id;
+        const actorAlpha = isStageFocus ? 1 : (stagePresentationActive ? 0.14 : idle ? 0.45 : 1);
+        const focusScale = isStageFocus ? STAGE_FOCUS_SCALE : 1;
+        const shake = isStageFocus ? Math.sin(Date.now()/55) * 2.2 : 0;
+        const drawX = isStageFocus ? sx - (CHARACTER_RENDER_SIZE - TILE_SIZE) / 2 : sx - (CHARACTER_RENDER_SIZE - TILE_SIZE) / 2;
+        const drawY = isStageFocus ? sy - 38 + shake : sy - 32;
+        const col={'S':0,'N':1,'W':2,'E':3}[(p.lastDirection||'S').toUpperCase()]||0;
+        const row=Math.floor(p.animFrame);
+        const si=(p.sprite&&characterImages[p.sprite])?characterImages[p.sprite]:images['player'];
+        const pw=si.width/4,ph=si.height/4;
+        ctx.save();
+        ctx.globalAlpha=actorAlpha;
+        ctx.drawImage(si,col*pw,row*ph,pw,ph,drawX,drawY,CHARACTER_RENDER_SIZE*focusScale,CHARACTER_RENDER_SIZE*focusScale);
+        const cx2=sx+TILE_SIZE/2;
+        const floatY=Math.sin(Date.now()/300+p.x)*2;
+        const nameY=sy-15;
+
+        ctx.restore();
+
+        actorOverlays.push(() => {
+          ctx.save();
+          ctx.globalAlpha=actorAlpha;
+
+          if (isStageFocus) {
+            const focusW = CHARACTER_RENDER_SIZE * focusScale + 14;
+            const focusH = CHARACTER_RENDER_SIZE * focusScale + 14;
+            ctx.strokeStyle = `rgba(255,215,64,${0.62 + 0.22 * Math.sin(Date.now()/180)})`;
+            ctx.lineWidth = 3 / camera.zoom;
+            ctx.shadowColor = 'rgba(255,215,64,0.6)';
+            ctx.shadowBlur = 20 / camera.zoom;
+            ctx.beginPath();
+            ctx.roundRect(drawX - 7, drawY - 7, focusW, focusH, 10);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+          }
+
+          if(selectedPlayerId&&p.id===selectedPlayerId){
+            const selectionW = CHARACTER_RENDER_SIZE * focusScale + 6;
+            const selectionH = CHARACTER_RENDER_SIZE * focusScale + 6;
+            ctx.strokeStyle=`rgba(116,185,255,${0.5+0.3*Math.sin(Date.now()/300)})`;
+            ctx.lineWidth=2/camera.zoom;
+            ctx.beginPath(); ctx.roundRect(drawX-3,drawY-3,selectionW,selectionH,10); ctx.stroke();
+            const ay=drawY-12+Math.sin(Date.now()/400)*3;
+            ctx.fillStyle='#74b9ff'; ctx.beginPath(); ctx.moveTo(cx2-4,ay); ctx.lineTo(cx2+4,ay); ctx.lineTo(cx2,ay+5); ctx.closePath(); ctx.fill();
+          }
+
+          ctx.font='400 14px "Pixelify Sans","Comic Sans MS",sans-serif';
+          ctx.textAlign='center'; ctx.textBaseline='middle';
+          ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.strokeStyle=idle?'rgba(26,26,46,0.55)':'rgba(26,26,46,0.9)'; ctx.strokeText(p.name,cx2,nameY);
+          ctx.fillStyle=p.name==='Observer'?'#f1c40f':(idle?'rgba(255,255,255,0.72)':'#ffffff'); ctx.fillText(p.name,cx2,nameY);
+
+          const bubbleY=sy-27+floatY;
+          ctx.textAlign='center'; ctx.textBaseline='middle';
+          if(p.isThinking){
+            const thinkEmotes=[1,6,2],idx=thinkEmotes[Math.floor(Date.now()/900)%3],ei=emoteImages[idx];
+            const bw=28,bh=28,bx=cx2-14,by=bubbleY-bh;
+            ctx.fillStyle='rgba(255,255,255,0.95)'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,10); ctx.fill();
+            ctx.strokeStyle='#a4b0be'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
+            ctx.fillStyle='rgba(255,255,255,0.9)';
+            ctx.beginPath(); ctx.arc(cx2-5,bubbleY+2,3,0,Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(cx2-2,bubbleY+6,2,0,Math.PI*2); ctx.fill();
+            if(ei&&ei.complete){ctx.imageSmoothingEnabled=false;ctx.drawImage(ei,bx+(bw-18)/2,by+(bh-18)/2,18,18);ctx.imageSmoothingEnabled=true;}
+          } else if(p.interactionText){
+            const actText=p.interactionText.length>16?p.interactionText.substring(0,16)+'...':p.interactionText;
+            ctx.font='400 12px "Pixelify Sans",sans-serif';
+            const hasIcon=p.interactionIcon&&itemImages[p.interactionIcon];
+            const iconSpace=hasIcon?20:0, pad=10;
+            const bw=ctx.measureText(actText).width+iconSpace+pad*2, bh=28;
+            const bx=cx2-bw/2, by=sy-65+floatY;
+            ctx.fillStyle='rgba(255,248,220,0.97)'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,8); ctx.fill();
+            ctx.strokeStyle='#e67e22'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
+            ctx.fillStyle='rgba(255,248,220,0.97)'; ctx.beginPath(); ctx.moveTo(cx2-4,by+bh); ctx.lineTo(cx2+4,by+bh); ctx.lineTo(cx2,by+bh+6); ctx.closePath(); ctx.fill();
+            ctx.strokeStyle='#e67e22'; ctx.lineWidth=1.5/camera.zoom; ctx.stroke();
+            let tx=bx+pad;
+            if(hasIcon){const ii=itemImages[p.interactionIcon];if(ii.complete){ctx.imageSmoothingEnabled=false;ctx.drawImage(ii,bx+pad,by+(bh-16)/2,16,16);ctx.imageSmoothingEnabled=true;}tx+=iconSpace;}
+            ctx.font='400 12px "Pixelify Sans",sans-serif'; ctx.fillStyle='#8B5E14'; ctx.textAlign='left';
+            ctx.fillText(actText,tx,by+bh/2+1); ctx.textAlign='center';
+          } else if(p.message){
+            const isAct0Conversation = currentActState.act === 0;
+            const msgMaxLength = isAct0Conversation ? 44 : 36;
+            const msg = p.message.length > msgMaxLength ? p.message.substring(0, msgMaxLength) + '…' : p.message;
+            ctx.font=`400 ${isAct0Conversation ? 30 : 26}px "Pixelify Sans",sans-serif`;
+            const bw=ctx.measureText(msg).width+(isAct0Conversation ? 88 : 72);
+            const bh=isAct0Conversation ? 72 : 60;
+            const bx=cx2-bw/2,by=sy-(isAct0Conversation ? 136 : 122)+floatY;
+            if (isAct0Conversation) {
+              ctx.shadowColor='rgba(116,185,255,0.24)';
+              ctx.shadowBlur=18/camera.zoom;
+              ctx.fillStyle='rgba(255,255,255,0.98)'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,18); ctx.fill();
+              ctx.shadowBlur=0;
+              ctx.strokeStyle='rgba(116,185,255,0.88)'; ctx.lineWidth=2.8/camera.zoom; ctx.stroke();
+              ctx.fillStyle='rgba(255,255,255,0.98)'; ctx.beginPath(); ctx.moveTo(cx2-8,by+bh); ctx.lineTo(cx2+8,by+bh); ctx.lineTo(cx2,by+bh+14); ctx.closePath(); ctx.fill();
+              ctx.strokeStyle='rgba(116,185,255,0.88)'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
+              ctx.fillStyle='#3f4c6b'; ctx.fillText(msg,cx2,by+bh/2+2);
+            } else {
+              ctx.fillStyle='white'; ctx.beginPath(); ctx.roundRect(bx,by,bw,bh,16); ctx.fill();
+              ctx.strokeStyle='#8ecf7e'; ctx.lineWidth=2.6/camera.zoom; ctx.stroke();
+              ctx.fillStyle='#5c4a3d'; ctx.fillText(msg,cx2,by+bh/2+1);
+            }
+          }
+
+          ctx.restore();
+        });
+      });
+
+      if(hasLegacyLayering()){
+        ['Nature','Building','BuildingTop'].forEach(name=>{
+          const l=mapData.layers.find(l=>l.type==='tilelayer'&&l.name===name&&l.visible);
+          drawTileLayer(l);
+        });
+      }
+      drawParticlesOfType('leaf');
+      drawParticlesOfType('firefly');
+
+      actorOverlays.forEach(drawOverlay => drawOverlay());
+
+      const ov=getDayNightOverlay();
+      if(ov.a>0){ ctx.fillStyle=`rgba(${ov.r},${ov.g},${ov.b},${ov.a})`; ctx.fillRect(camera.x,camera.y,VIEWPORT_W/camera.zoom,VIEWPORT_H/camera.zoom); }
+
+      const zl=mapData.layers.find(l=>l.type==='objectgroup');
+      if(zl&&zl.objects&&mouseX>=0){
+        zl.objects.forEach(zone=>{
+          const sx2=TILE_SIZE/mapData.tilewidth,sy2=TILE_SIZE/mapData.tileheight;
+          const rx=zone.x*sx2,ry=zone.y*sy2,rw=zone.width*sx2,rh=zone.height*sy2;
+          if(mouseX>=rx&&mouseX<=rx+rw&&mouseY>=ry&&mouseY<=ry+rh){
+            ctx.font='bold 16px "Pixelify Sans",sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            const tw=ctx.measureText(zone.name).width+20,th=35,tx=mouseX-15,ty=mouseY-30;
+            ctx.fillStyle='rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.roundRect(tx,ty,tw,th,8); ctx.fill();
+            ctx.strokeStyle='#f39c12'; ctx.lineWidth=2/camera.zoom; ctx.stroke();
+            ctx.fillStyle='#5c4a3d'; ctx.fillText(zone.name,tx+tw/2,ty+th/2);
+          }
+        });
+      }
+
+      ctx.restore();
+      ctx.imageSmoothingEnabled=true;
+
+      if (stagePresentationActive) {
+        drawActPresentation();
+      }
+
+      // === 屏幕坐标层：检测玩家悬停 ===
+      hoveredPlayerId=null;
+      for(const id in clientPlayers){
+        const p=clientPlayers[id]; if(p.name==='Observer') continue;
+        const spx=(p.displayX-camera.x)*camera.zoom, spy=(p.displayY-camera.y)*camera.zoom;
+        const drawY = spy - 32 * camera.zoom;
+        const pw2=CHARACTER_RENDER_SIZE*camera.zoom, ph2=CHARACTER_RENDER_SIZE*camera.zoom;
+        if(mouseScreenX>=spx&&mouseScreenX<=spx+pw2&&mouseScreenY>=drawY&&mouseScreenY<=drawY+ph2){ hoveredPlayerId=id; break; }
+      }
+
+      // 悬浮卡最后绘制，确保压在所有世界元素之上。
+      if(hoveredPlayerId&&clientPlayers[hoveredPlayerId]){
+        const p=clientPlayers[hoveredPlayerId];
+        const spx=(p.displayX-camera.x)*camera.zoom+TILE_SIZE*camera.zoom/2;
+        const spy=(p.displayY-camera.y)*camera.zoom;
+        drawPlayerHoverCard(p,spx,spy);
+      }
+    }
+
+    function drawActPresentation() {
+      ctx.save();
+      ctx.fillStyle = 'rgba(248,250,252,0.94)';
+      ctx.fillRect(0, 0, VIEWPORT_W, VIEWPORT_H);
+
+      const speaker = currentActScene.agentId ? clientPlayers[currentActScene.agentId] : null;
+      if (speaker) {
+        const px = (speaker.displayX - camera.x) * camera.zoom + TILE_SIZE * camera.zoom / 2;
+        const py = (speaker.displayY - camera.y) * camera.zoom + TILE_SIZE * camera.zoom / 2;
+        const radius = 96 + Math.sin(Date.now() / 120) * 8;
+        const glow = ctx.createRadialGradient(px, py, 10, px, py, radius);
+        glow.addColorStop(0, 'rgba(255,255,255,0.06)');
+        glow.addColorStop(0.55, 'rgba(255,255,255,0.10)');
+        glow.addColorStop(1, 'rgba(226,232,240,0.92)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(px, py, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      const cardX = 52;
+      const cardY = 38;
+      const cardW = VIEWPORT_W - 104;
+      const cardH = 206;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(cardX, cardY, cardW, cardH, 24);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#64748b';
+      ctx.font = '700 14px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`第${currentActState.act}幕 · ${currentActState.name || '舞台展示'}`, cardX + 26, cardY + 28);
+
+      const portraitX = cardX + 24;
+      const portraitY = cardY + 46;
+      const portraitSize = 96;
+      ctx.fillStyle = '#f8fafc';
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(portraitX, portraitY, portraitSize, portraitSize, 18);
+      ctx.fill();
+      ctx.stroke();
+
+      if (speaker) {
+        const si = (speaker.sprite && characterImages[speaker.sprite]) ? characterImages[speaker.sprite] : images['player'];
+        if (si && si.complete) {
+          const pw = si.width / 4;
+          const ph = si.height / 4;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(si, 0, 0, pw, ph, portraitX + 16, portraitY + 12, 64, 64);
+          ctx.imageSmoothingEnabled = true;
+        }
+      }
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 12px sans-serif';
+      ctx.fillText('角色样式', portraitX + 18, portraitY + 86);
+
+      const textX = portraitX + portraitSize + 24;
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 28px sans-serif';
+      ctx.fillText(currentActScene.title || '正在展示', textX, cardY + 82);
+
+      ctx.fillStyle = '#475569';
+      ctx.font = '600 15px sans-serif';
+      ctx.fillText(`发言人：${speaker ? (speaker.name || currentActScene.agentId) : (currentActScene.agentId || '待定')}`, textX, cardY + 114);
+      ctx.fillText(`立绘：${speaker && speaker.sprite ? speaker.sprite : '默认'}`, textX, cardY + 138);
+
+      ctx.fillStyle = '#334155';
+      ctx.font = '500 16px sans-serif';
+      const lines = wrapStageText(currentActScene.text || '', cardW - (textX - cardX) - 28);
+      lines.slice(0, 4).forEach((line, index) => {
+        ctx.fillText(line, textX, cardY + 170 + index * 22);
+      });
+
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#dbeafe';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(170, VIEWPORT_H - 74, VIEWPORT_W - 340, 44, 22);
+      ctx.fill();
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#1d4ed8';
+      ctx.font = '600 14px sans-serif';
+      const tipText = currentActScene.phase === 'closing'
+        ? '自我介绍结束，舞台即将返回普通交流状态'
+        : '管理员后台点击“下一位介绍”后，才会切换到下一位';
+      ctx.fillText(tipText, VIEWPORT_W / 2, VIEWPORT_H - 47);
+      ctx.restore();
+    }
+
+    function wrapStageText(text, maxWidth) {
+      if (!text) return [];
+      const result = [];
+      let line = '';
+      ctx.save();
+      ctx.font = '500 16px sans-serif';
+      for (const char of text) {
+        const next = line + char;
+        if (ctx.measureText(next).width > maxWidth && line) {
+          result.push(line);
+          line = char;
+        } else {
+          line = next;
+        }
+      }
+      if (line) result.push(line);
+      ctx.restore();
+      return result;
+    }
+
+    // ==========================================
+    // === 按类型绘制粒子 ===
+    // ==========================================
+    function drawParticlesOfType(type){
+      for(const p of particles){
+        if(p.type!==type) continue;
+        const fadeRatio=Math.min(1,p.life/(p.maxLife*0.3));
+        if(type==='firefly'){
+          const glow=0.4+0.6*Math.sin(Date.now()/200+p.phase),alpha=fadeRatio*glow;
+          ctx.beginPath();ctx.arc(p.x,p.y,p.size*4,0,Math.PI*2);ctx.fillStyle=`rgba(200,255,100,${alpha*0.15})`;ctx.fill();
+          const si=particleSprites['Spark'];
+          if(si&&si.complete){const fw=si.width/9,fr=Math.floor(Date.now()/200+p.phase)%Math.max(1,Math.floor(si.width/8));ctx.save();ctx.globalAlpha=alpha*0.9;ctx.imageSmoothingEnabled=false;ctx.drawImage(si,fr*fw,0,fw,si.height,p.x-p.size*1.5,p.y-p.size*1.5,p.size*3,p.size*3);ctx.globalAlpha=1;ctx.imageSmoothingEnabled=true;ctx.restore();}
+          else{ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fillStyle=`rgba(240,255,150,${alpha*0.9})`;ctx.fill();}
+        } else if(type==='leaf'){
+          const lt=(p.x+p.y)%2===0?'Leaf':'LeafPink',li=particleSprites[lt];
+          if(li&&li.complete){const fw=li.height,nf=Math.max(1,Math.floor(li.width/fw)),fr=Math.floor(p.rot*2)%nf;ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot*0.3);ctx.globalAlpha=fadeRatio*0.8;ctx.imageSmoothingEnabled=false;ctx.drawImage(li,Math.abs(fr)*fw,0,fw,li.height,-p.size*1.5,-p.size*1.5,p.size*3,p.size*3);ctx.globalAlpha=1;ctx.imageSmoothingEnabled=true;ctx.restore();}
+          else{ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot);ctx.globalAlpha=fadeRatio*0.7;ctx.fillStyle='#6ab04c';ctx.fillRect(-p.size,-p.size/2,p.size*2,p.size);ctx.globalAlpha=1;ctx.restore();}
+        } else if(type==='shimmer'){
+          const alpha=fadeRatio*(0.3+0.3*Math.sin(Date.now()/150+p.x));
+          ctx.beginPath();ctx.arc(p.x,p.y,p.size,0,Math.PI*2);ctx.fillStyle=`rgba(200,230,255,${alpha})`;ctx.fill();
+        }
+      }
+    }
+
+    // ==========================================
+    // === 绘制小地图 ===
+    // ==========================================
+    function drawMinimap(){
+      if(!mapData) return;
+      const mw=miniCanvas.width,mh=miniCanvas.height;
+      const mapPixelW=mapData.width*TILE_SIZE,mapPixelH=mapData.height*TILE_SIZE;
+      const scale=Math.min(mw/mapPixelW,mh/mapPixelH);
+      miniCtx.clearRect(0,0,mw,mh);
+      miniCtx.fillStyle='#2d3436'; miniCtx.fillRect(0,0,mw,mh);
+
+      const zl=mapData.layers.find(l=>l.type==='objectgroup');
+      if(zl&&zl.objects){
+        const ts=TILE_SIZE/mapData.tilewidth;
+        zl.objects.forEach(zone=>{
+          const n=(zone.name||'').toLowerCase();
+          if(n.includes('paved')||n.includes('road')) return;
+          const zx=zone.x*ts*scale,zy=zone.y*ts*scale;
+          const zw=Math.max((zone.width||20)*ts*scale,4),zh=Math.max((zone.height||20)*ts*scale,4);
+          // 小地图同步强调当前跟随目标所在区域。
+          if(selectedPlayerId&&clientPlayers[selectedPlayerId]&&clientPlayers[selectedPlayerId].currentZoneName===zone.name){
+            miniCtx.fillStyle='rgba(116,185,255,0.5)'; miniCtx.fillRect(zx,zy,zw,zh);
+            miniCtx.strokeStyle='#74b9ff'; miniCtx.lineWidth=1.5; miniCtx.strokeRect(zx,zy,zw,zh);
+          } else if(n.includes('pond')||n.includes('water')){miniCtx.fillStyle='rgba(116,185,255,0.4)';miniCtx.fillRect(zx,zy,zw,zh);}
+          else if(n.includes('tree')||n.includes('grass')){miniCtx.fillStyle='rgba(106,176,76,0.4)';miniCtx.fillRect(zx,zy,zw,zh);}
+          else{miniCtx.fillStyle='rgba(253,203,110,0.3)';miniCtx.fillRect(zx,zy,zw,zh);}
+          if(!n.includes('tree')&&!n.includes('paved')&&!n.includes('grass')){
+            miniCtx.font='7px "Pixelify Sans",sans-serif';miniCtx.fillStyle='rgba(255,255,255,0.7)';
+            miniCtx.textAlign='center';miniCtx.textBaseline='middle';
+            miniCtx.fillText(zone.name.split('(')[0].trim().substring(0,6),zx+zw/2,zy+zh/2);
+          }
+        });
+      }
+
+      // 玩家点位与名字同时显示，方便在缩略图里快速定位。
+      for(const id in clientPlayers){
+        const p=clientPlayers[id];
+        const px=p.displayX*scale+2,py=p.displayY*scale+2;
+        miniCtx.beginPath(); miniCtx.arc(px,py,id===selectedPlayerId?4:3,0,Math.PI*2);
+        miniCtx.globalAlpha=isPlayerIdle(p)?0.45:1;
+        miniCtx.fillStyle=id===selectedPlayerId?'#74b9ff':(p.name==='Observer'?'#f1c40f':'#e74c3c'); miniCtx.fill();
+        miniCtx.globalAlpha=1;
+        miniCtx.font='bold 8px "Pixelify Sans",sans-serif'; miniCtx.fillStyle='#fff'; miniCtx.textAlign='center';
+        miniCtx.fillText(p.name,px,py-6);
+      }
+
+      // 当前视口边框能帮助理解主画布正在看地图的哪一块。
+      const vx=camera.x*scale,vy=camera.y*scale;
+      const vw=(VIEWPORT_W/camera.zoom)*scale,vh=(VIEWPORT_H/camera.zoom)*scale;
+      miniCtx.strokeStyle='rgba(255,255,255,0.65)'; miniCtx.lineWidth=1;
+      miniCtx.setLineDash([3,2]); miniCtx.strokeRect(vx,vy,vw,vh); miniCtx.setLineDash([]);
+    }
+
+    // ==========================================
+    // === 聊天日志 ===
+    // ==========================================
+    function addChatMessage(entryOrName,message,timestamp){
+      const entry=typeof entryOrName==='object'&&entryOrName!==null
+        ? {type:'chat',scope:entryOrName.scope||'local',name:entryOrName.name,message:entryOrName.message,time:entryOrName.time||Date.now()}
+        : {type:'chat',scope:'local',name:entryOrName,message,time:timestamp||Date.now()};
+      chatMessages.push(entry);
+      if(chatMessages.length>MAX_DISPLAY_MESSAGES) chatMessages.shift();
+      renderChatEntry(entry);
+    }
+    function addInteractionMessage(entry){
+      chatMessages.push({type:'interaction',...entry});
+      if(chatMessages.length>MAX_DISPLAY_MESSAGES) chatMessages.shift();
+      renderChatEntry({type:'interaction',...entry});
+    }
+    function renderChatEntry(entry){
+      const div=document.createElement('div');
+      div.className='chat-entry';
+      const t=new Date(entry.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      if(entry.type==='chat'){
+        const scopeTag=entry.scope==='broadcast'?'<span class="chat-name">[广播]</span> ':'';
+        div.innerHTML=`<span class="chat-time">${t}</span> ${scopeTag}<span class="chat-name">${escapeHtml(entry.name)}</span>: ${escapeHtml(entry.message)}`;
+      }
+      else{
+        div.className='chat-entry interaction-entry';
+        div.innerHTML=`<span class="chat-time">${t}</span> ${escapeHtml(entry.name)} @ ${escapeHtml(entry.zone||'')}: ${escapeHtml(entry.action||'')}`;
+      }
+      chatlogEl.appendChild(div); chatlogEl.scrollTop=chatlogEl.scrollHeight;
+    }
+    function escapeHtml(text){ const d=document.createElement('div'); d.textContent=text||''; return d.innerHTML; }
+
+    // ==========================================
+    // === AI 面板 ===
+    // ==========================================
+    function updateAiPanel(){
+      const players=Object.values(clientPlayers).filter(p=>p.name!=='Observer');
+      aiCountEl.textContent=`${players.length} online`;
+      aiListEl.innerHTML='';
+      players.forEach(p=>{
+        const wrap=document.createElement('div');
+        wrap.className='ai-avatar-wrap'+(selectedPlayerId===p.id?' selected':'');
+        wrap.title=`${p.name}\n${p.currentZoneName||'小镇街道'}`;
+        // Canvas: 32x32 internal, CSS sizes it responsively
+        const ac=document.createElement('canvas'); ac.width=64; ac.height=64; ac.className='ai-avatar-icon';
+        const si=(p.sprite&&characterImages[p.sprite])?characterImages[p.sprite]:images['player'];
+        if(si&&si.complete){
+          const actx=ac.getContext('2d'); actx.imageSmoothingEnabled=false;
+          // Sample the front-facing idle frame (row 0, col 0)
+          const fw=si.width/4, fh=si.height/4;
+          actx.drawImage(si, 0, 0, fw, fh, 0, 0, 64, 64);
+        }
+        const statusClass=p.isThinking?'thinking':(isPlayerIdle(p)?'idle':'active');
+        const dot=document.createElement('span'); dot.className='ai-avatar-dot '+statusClass;
+        const nameEl=document.createElement('span'); nameEl.className='ai-avatar-name'; nameEl.textContent=p.name;
+        wrap.appendChild(ac); wrap.appendChild(dot); wrap.appendChild(nameEl);
+        wrap.addEventListener('click',()=>{
+          if(selectedPlayerId===p.id){ selectedPlayerId=null; isCameraFollowing=false; activityDetailEl.classList.remove('visible'); }
+          else selectAndFollowPlayer(p.id);
+          updateAiPanel();
+        });
+        aiListEl.appendChild(wrap);
+      });
+      if(selectedPlayerId&&!clientPlayers[selectedPlayerId]){ selectedPlayerId=null; isCameraFollowing=false; activityDetailEl.classList.remove('visible'); }
+    }
+
+    let selectedFlashTime=0;
+    function renderActivityLog(playerId){
+      const acts=playerActivityData[playerId]||[];
+      activityLogEl.innerHTML='';
+      acts.slice().reverse().forEach(a=>{
+        const div=document.createElement('div'); div.className='activity-item';
+        const t=new Date(a.time).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        div.innerHTML=`<span class="activity-time">${t}</span> <span class="activity-type-${a.type||'move'}">${escapeHtml(a.text||'')}</span>`;
+        activityLogEl.appendChild(div);
+      });
+    }
+
+    // ==========================================
+    // === 统计面板 ===
+    // ==========================================
+    function updateStatsPanel(){
+      const el=document.getElementById('stats-content'); if(!el) return;
+      const stats={}; let hasData=false;
+      for(const id in playerActivityData){
+        const p=clientPlayers[id]; if(!p||p.name==='Observer') continue;
+        const acts=playerActivityData[id]||[];
+        stats[p.name]={moves:acts.filter(a=>a.type==='move').length,says:acts.filter(a=>a.type==='say').length,interacts:acts.filter(a=>a.type==='interact').length};
+        if(acts.length>0) hasData=true;
+      }
+      const names=Object.keys(stats);
+      if(!hasData||names.length===0){el.innerHTML='<span id="stats-empty">Waiting for data...</span>';return;}
+      const topMove=names.reduce((a,b)=>stats[a].moves>=stats[b].moves?a:b);
+      const topSay=names.reduce((a,b)=>stats[a].says>=stats[b].says?a:b);
+      const topInteract=names.reduce((a,b)=>stats[a].interacts>=stats[b].interacts?a:b);
+      let html='';
+      if(stats[topMove].moves>0) html+=`<div class="stat-row">🚶 最活跃: <span class="stat-name">${escapeHtml(topMove)}</span> (${stats[topMove].moves} 步)</div>`;
+      if(stats[topSay].says>0) html+=`<div class="stat-row">💬 最健谈: <span class="stat-name">${escapeHtml(topSay)}</span> (${stats[topSay].says} 句)</div>`;
+      if(stats[topInteract].interacts>0) html+=`<div class="stat-row">🎭 最互动: <span class="stat-name">${escapeHtml(topInteract)}</span> (${stats[topInteract].interacts} 次)</div>`;
+      el.innerHTML=html||'<span id="stats-empty">Waiting for data...</span>';
+    }
+    setInterval(updateStatsPanel, 3000);
+
+    // 页面脚本只启动一次，真正的重连交给 EventSource 自己处理。
+    initialize();

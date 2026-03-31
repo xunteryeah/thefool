@@ -1,0 +1,8 @@
+﻿{
+  "name": "town-autopilot",
+  "version": "1.0.0",
+  "description": "Alicization Town 自动驾驶",
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}
