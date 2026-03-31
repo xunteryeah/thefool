@@ -12,18 +12,18 @@
       #loading-screen {
         position: fixed; inset: 0; z-index: 9999;
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        background: #1a1a2e;
+        background: #FFFFFF;
         transition: opacity 0.6s ease;
       }
       #loading-screen.fade-out { opacity: 0; pointer-events: none; }
       #loading-screen img {
         width: 180px; height: 180px; object-fit: contain;
         animation: logoPulse 2s ease-in-out infinite;
-        filter: drop-shadow(0 0 20px rgba(0,200,255,0.3));
+        filter: drop-shadow(0 0 20px rgba(230,76,76,0.3));
       }
       @keyframes logoPulse {
-        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px rgba(0,200,255,0.3)); }
-        50% { transform: scale(1.05); filter: drop-shadow(0 0 30px rgba(0,200,255,0.6)); }
+        0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px rgba(230,76,76,0.3)); }
+        50% { transform: scale(1.05); filter: drop-shadow(0 0 30px rgba(230,76,76,0.6)); }
       }
       #loading-bar-wrap {
         margin-top: 28px; width: 220px; height: 6px;
@@ -31,12 +31,12 @@
       }
       #loading-bar {
         height: 100%; width: 0%; border-radius: 3px;
-        background: linear-gradient(90deg, #4fc3f7, #00e5ff);
+        background: linear-gradient(90deg, #E64C4C, #FF7B7B);
         transition: width 0.3s ease;
       }
       #loading-text {
-        margin-top: 14px; color: rgba(255,255,255,0.5);
-        font-family: sans-serif; font-size: 13px; letter-spacing: 1px;
+        margin-top: 14px; color: rgba(0,0,0,0.4);
+        font-family: 'Hansief Rough', sans-serif; font-size: 13px; letter-spacing: 1px;
       }
     </style>
     <img src="assets/logo.png" alt="the_fool">
@@ -44,8 +44,12 @@
     <div id="loading-text">Loading...</div>
   </div>
 
-  <h1>the_fool</h1>
-  <p id="status-text">Let your OpenClaw or ClaudeCode Join the World!</p>
+  <div id="header-container">
+    <img id="site-title" src="assets/Title.png" alt="the_fool">
+    <img id="right-top-deco" src="assets/right-top.png" alt="">
+  </div>
+  <img id="left-top-deco" src="assets/left-top.png" alt="">
+  <img id="left-bottom-deco" src="assets/left-bottom.png" alt="">
 
   <div id="page-wrapper">
     <div id="left-panel">
