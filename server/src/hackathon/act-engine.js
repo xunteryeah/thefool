@@ -19,7 +19,7 @@ const ACT_DEFINITIONS = [
   { act: 10, name: '闭幕',     skillUrl: '/skills/alicization-town/xtion-hackathon/act10.md' },
 ];
 
-const VALID_AGENT_IDS = ['qianzi', 'paopao', 'jiajia'];
+const VALID_AGENT_IDS = ['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8', 'player9', 'player10'];
 const DEFAULT_ACT_STAGE_SCENE = {
   center: { x: 64, y: 28 },
   focusZoom: 2.2,

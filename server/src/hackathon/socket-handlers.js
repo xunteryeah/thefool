@@ -13,7 +13,7 @@ const { HACKATHON_CONFIG } = require('../config/service-config');
 const AGENT_ROLES = ['agent_player', 'agent_judge', 'agent_organizer'];
 const DEFAULT_AGENT_IDS = HACKATHON_CONFIG.AGENT_PLAYER_IDS.length
   ? HACKATHON_CONFIG.AGENT_PLAYER_IDS
-  : ['qianzi', 'paopao', 'jiajia'];
+  : ['player1', 'player2', 'player3', 'player4', 'player5', 'player6', 'player7', 'player8', 'player9', 'player10'];
 
 /**
  * Register all Socket.io event handlers on the given io instance.
