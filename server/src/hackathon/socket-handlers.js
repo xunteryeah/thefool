@@ -13,7 +13,7 @@ const { HACKATHON_CONFIG } = require('../config/service-config');
 const AGENT_ROLES = ['agent_player', 'agent_judge', 'agent_organizer'];
 const DEFAULT_AGENT_IDS = HACKATHON_CONFIG.AGENT_PLAYER_IDS.length
   ? HACKATHON_CONFIG.AGENT_PLAYER_IDS
-  : ['stem', 'dunangnang', 'hailaoyuan', 'chenxingzhou', 'juanniu', 'xiaoj', 'xiahuang', 'tiou', 'zhiyumaomao', 'lajiwang', 'zhizi', 'player12'];
+  : ['stem', 'dunangnang', 'hailaoyuan', 'chenxingzhou', 'juanniu', 'xiaoj', 'xiahuang', 'tiou', 'zhiyumaomao', 'lajiwang', 'zhizi', 'chengxuxia'];
 
 /**
  * Register all Socket.io event handlers on the given io instance.
