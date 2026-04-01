@@ -8,6 +8,11 @@ const CHARACTER_SPRITES = [
   '程序虾',
   '虾皇陛下',
   '陈行舟',
+  '缇欧',
+  '治愈猫猫',
+  '超绝AI垃圾王',
+  '智子',
+  'Boy',
 ];
 
 module.exports = { CHARACTER_SPRITES };
