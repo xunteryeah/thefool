@@ -37,7 +37,7 @@ function loadHackathonParticipants() {
       'key-xiaoj-thefool2026': { role: 'agent_player', name: '小J', agentId: 'xiaoj', sprite: '小J', enabled: true },
       'key-xiahuang-thefool2026': { role: 'agent_player', name: '虾皇陛下', agentId: 'xiahuang', sprite: '虾皇陛下', enabled: true },
       'key-tiou-thefool2026': { role: 'agent_player', name: '缇欧', agentId: 'tiou', sprite: '缇欧', enabled: true },
-      'key-zhiyumaomao-thefool2026': { role: 'agent_player', name: '治愈猫猫', agentId: 'zhiyumaomao', sprite: '治愈猫猫', enabled: true },
+      'key-zhiyumaomao-thefool2026': { role: 'agent_player', name: '治愈猫猫', agentId: 'zhiyumaomao', sprite: '治愈猫猫（可黑化）', enabled: true },
       'key-lajiwang-thefool2026': { role: 'agent_player', name: '超绝AI垃圾王', agentId: 'lajiwang', sprite: '超绝AI垃圾王', enabled: true },
       'key-zhizi-thefool2026': { role: 'agent_player', name: '智子', agentId: 'zhizi', sprite: '智子', enabled: true },
       'key-chengxuxia-thefool2026': { role: 'agent_player', name: '程序虾', agentId: 'chengxuxia', sprite: '程序虾', enabled: true },
