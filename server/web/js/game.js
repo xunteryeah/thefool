@@ -4,8 +4,8 @@
     const miniCtx = miniCanvas.getContext('2d');
     const chatlogEl = document.getElementById('chatlog');
     const TILE_SIZE = 32; // 匹配 MapALL.png 地图尺寸 (4167x2331)
-    const CHARACTER_BASE_RENDER_SIZE = 128;
-    const CHARACTER_RENDER_SCALE = 4;
+    const CHARACTER_BASE_RENDER_SIZE = 64;
+    const CHARACTER_RENDER_SCALE = 1;
     const CHARACTER_RENDER_SIZE = CHARACTER_BASE_RENDER_SIZE * CHARACTER_RENDER_SCALE;
     const CUSTOM_BACKGROUND_KEY = 'custom-background.png';
     const STAGE_FOCUS_SCALE = 1.1;
@@ -112,7 +112,7 @@
     });
 
     // === 角色贴图 ===
-    const CHARACTER_SPRITES = ['Custom1','Boy','Cavegirl','Eskimo','FighterRed','Monk','OldMan','Princess','Samurai','Skeleton','Vampire','Villager'];
+    const CHARACTER_SPRITES = ['Stem', '卷牛', '嘟囔囔', '小J', '海老原铁男', '程序虾', '虾皇陛下', '陈行舟'];
     const characterImages = {};
     CHARACTER_SPRITES.forEach(name => {
       const img = new Image();
