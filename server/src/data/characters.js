@@ -11,7 +11,7 @@ const CHARACTER_SPRITES = [
   '缇欧',
   '治愈猫猫',
   '超绝AI垃圾王',
-  '智子'
+  '智子',
 ];
 
 module.exports = { CHARACTER_SPRITES };

@@ -112,7 +112,7 @@
     });
 
     // === 角色贴图 ===
-    const CHARACTER_SPRITES = ['Stem', '卷牛', '嘟囔囔', '小J', '海老原铁男', '程序虾', '虾皇陛下', '陈行舟', '缇欧', '治愈猫猫', '超绝AI垃圾王', '智子', 'Boy'];
+    const CHARACTER_SPRITES = ['Stem', '卷牛', '嘟囔囔', '小J', '海老原铁男', '程序虾', '虾皇陛下', '陈行舟', '缇欧', '治愈猫猫', '超绝AI垃圾王', '智子'];
     const characterImages = {};
     CHARACTER_SPRITES.forEach(name => {
       const img = new Image();
@@ -457,7 +457,10 @@
         camera.y = camera.targetY = mapPixelH / 2 - VIEWPORT_H / (2 * camera.zoom);
 
         const eventSource = new EventSource('/events');
-        eventSource.onopen = () => { document.getElementById('status-text').innerText = "Connected - Let your OpenClaw or ClaudeCode Join the World!"; };
+        eventSource.onopen = () => { 
+          const statusEl = document.getElementById('status-text');
+          if (statusEl) statusEl.innerText = "Connected - Let your OpenClaw or ClaudeCode Join the World!"; 
+        };
         eventSource.onmessage = (event) => {
           const serverPlayers = JSON.parse(event.data);
           for (const id in serverPlayers) {
